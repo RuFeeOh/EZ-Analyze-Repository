@@ -15,11 +15,11 @@ tr.example-element-row {
 }
 
 tr.example-element-row:not(.example-expanded-row):hover {
-    background: whitesmoke;
+    background: var(--mat-sys-surface-bright)
 }
 
 tr.example-element-row:not(.example-expanded-row):active {
-    background: #efefef;
+    background: var(--mat-sys-surface-bright)
 }
 
 .example-element-row td {
