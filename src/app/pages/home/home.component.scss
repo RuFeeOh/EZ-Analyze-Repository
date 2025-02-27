@@ -1,0 +1,10 @@
+.container {
+    display: flex;
+    width: 100vw;
+    height: 100vh;
+    display: flex;
+    justify-content: center;
+    /*centers items on the line (the x-axis by default)*/
+    align-items: center;
+    /*centers items on the cross-axis (y by default)*/
+}
