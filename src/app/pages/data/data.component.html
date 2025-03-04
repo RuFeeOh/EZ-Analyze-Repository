@@ -11,6 +11,10 @@
     @else {
     <p>Click the button to upload data</p>
     }
+    <button mat-mini-fab color="primary" class="upload-btn" (click)="calculateexceedanceFraction()">
+        <mat-icon>assessment</mat-icon>
+    </button>
+    {{exceedanceFraction}}
 </div>
 
 
