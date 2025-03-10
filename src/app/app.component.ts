@@ -3,6 +3,7 @@ import { RouterOutlet, RouterLink, RouterLinkActive } from '@angular/router';
 import { MatButtonModule } from '@angular/material/button';
 import { MatSidenavModule } from '@angular/material/sidenav';
 import { MatListModule } from '@angular/material/list';
+import { LoginComponent } from './pages/login/login.component';
 
 @Component({
   selector: 'app-root',
@@ -12,7 +13,8 @@ import { MatListModule } from '@angular/material/list';
     RouterLinkActive,
     MatButtonModule,
     MatSidenavModule,
-    MatListModule
+    MatListModule,
+    LoginComponent,
   ],
   templateUrl: './app.component.html',
   styleUrl: './app.component.scss'
