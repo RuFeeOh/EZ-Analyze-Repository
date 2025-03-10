@@ -5,7 +5,7 @@ import { DataComponent } from './pages/data/data.component';
 
 export const routes: Routes = [
     {
-        path: '',
+        path: 'home',
         title: 'home',
         component: HomeComponent,
     },
