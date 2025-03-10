@@ -60,6 +60,6 @@ export class DataComponent {
       })
 
     console.log(TWAlist);
-    this.exceedanceFraction = this.exceedanceFractionservice.calculateExceedanceProbability(TWAlist, 0.01);
+    this.exceedanceFraction = this.exceedanceFractionservice.calculateExceedanceProbability(TWAlist, 0.05);
   }
 }
