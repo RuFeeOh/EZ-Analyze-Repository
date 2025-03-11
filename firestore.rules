@@ -1,0 +1,40 @@
+rules_version = '2';
+service cloud.firestore {
+  
+  // Allow only authenticated content userUids access
+  // then allows users to list tasks they've created
+  // then allows users to create a task if they are authenticated
+  // then allows users to delete a task if that task is owned by the user
+  match /databases/{database}/documents {
+    function isCreator() {
+        return resource  != null
+        		&& isLoggedIn() 
+            && resource.data != null
+            && request.auth.uid == resource.data.userUid;
+      }
+
+    function isLoggedIn() {
+        return request.auth != null;
+      }
+    match /tasks/{task} {
+      allow read, write: if isCreator();
+      allow list: if isCreator();
+      allow create: if isLoggedIn();
+      allow delete: if isCreator();
+    }
+    match /breakdownTask/{task} {
+      allow read, write: if isCreator();
+      allow list: if isCreator();
+      allow create: if isLoggedIn();
+      allow delete: if false;
+    }
+    match /* {
+      allow read, write: if false;
+      allow list: if false;
+      allow create: if false;
+      allow delete: if false;
+    }
+  }
+
+  
+}
