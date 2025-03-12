@@ -22,6 +22,12 @@ service cloud.firestore {
       allow create: if isLoggedIn();
       allow delete: if isCreator();
     }
+    match /organizations/{organization} {
+      allow read, write: if isLoggedIn();
+      allow list: if isLoggedIn();
+      allow create: if isLoggedIn();
+      allow delete: if isLoggedIn();
+    }
     match /breakdownTask/{task} {
       allow read, write: if isCreator();
       allow list: if isCreator();

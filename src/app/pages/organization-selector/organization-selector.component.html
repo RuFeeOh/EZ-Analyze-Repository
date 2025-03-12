@@ -2,3 +2,4 @@
 @for (org of organizationList; track org) {
 <button mat-flat-button class="orgButton">{{org}}</button>
 }
+<button mat-flat-button (click)="saveOrganization()" class="orgButton">new org</button>
