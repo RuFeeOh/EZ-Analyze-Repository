@@ -1,5 +1,13 @@
 <p>Select Your Organization</p>
-@for (org of organizationList; track org) {
-<button mat-flat-button class="orgButton">{{org}}</button>
+@for (org of organizationList$|async; track org) {
+<button mat-flat-button (click)="setOrganization(org)" class="orgButton">{{org.Name}}</button>
 }
-<button mat-flat-button (click)="saveOrganization()" class="orgButton">new org</button>
+
+<form class="Add new org">
+    <p>My organization isn't listed</p>
+    <mat-form-field class="example-full-width">
+        <mat-label>Enter Org</mat-label>
+        <input matInput placeholder="Name" [(ngModel)]="organizationName" name="newOrg">
+    </mat-form-field>
+    <button mat-flat-button (click)="saveOrganization()" class="orgButton">SAVE</button>
+</form>
