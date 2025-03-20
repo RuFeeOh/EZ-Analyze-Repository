@@ -26,5 +26,5 @@ jobs:
 
       - uses: JamesIves/github-pages-deploy-action@v4
         with:
-          folder: ./docs
+          folder: ./docs/browser
           token: ${{ secrets.GITHUB_TOKEN }}
