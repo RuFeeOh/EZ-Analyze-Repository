@@ -1,6 +1,7 @@
 {
   "name": "ezanalyze",
   "version": "0.0.0",
+  "homepage": "https://rufeeoh.github.io/EZ-Analyze-Repository",
   "scripts": {
     "ng": "ng",
     "start": "ng serve",
