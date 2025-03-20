@@ -17,9 +17,8 @@ import { CommonModule } from '@angular/common';
 export class OrganizationSelectorComponent {
   private firestore = inject(Firestore);
   private organizationService = inject(OrganizationService);
-  public organizationList: string[] = ["Covia", "New Corp", "JamieCorp", "ZacCorp",];
   public organizationName = "";
-  public organizationList$ = this.organizationService.getOrganization();
+  public organizationList = this.organizationService.organizationList;
   async saveOrganization() {
     console.log("saving org", this.organizationName);
 
