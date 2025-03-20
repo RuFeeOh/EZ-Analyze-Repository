@@ -22,9 +22,9 @@ jobs:
         run: npm install
 
       - name: Build the application
-        run: npm run build -- --configuration production --output-path docs --base-href=/Ez-Analyze-Repository
+        run: npm run build -- --configuration production --base-href=/Ez-Analyze-Repository/
 
       - uses: JamesIves/github-pages-deploy-action@v4
         with:
-          folder: ./docs/browser
+          folder: ./dist/browser
           token: ${{ secrets.GITHUB_TOKEN }}
