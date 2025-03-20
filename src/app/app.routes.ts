@@ -1,22 +1,22 @@
 import { Routes } from '@angular/router';
-import { OrganizationSelectorComponent } from './pages/organization-selector/organization-selector.component';
-import { HomeComponent } from './pages/home/home.component';
-import { DataComponent } from './pages/data/data.component';
 
 export const routes: Routes = [
     {
         path: 'home',
         title: 'home',
-        component: HomeComponent,
+        loadChildren: () =>
+            import('./pages/home/home.component').then(m => m.HomeComponent)
     },
     {
         path: 'org',
         title: 'Org Selector',
-        component: OrganizationSelectorComponent,
+        loadChildren: () =>
+            import('./pages/organization-selector/organization-selector.component').then(m => m.OrganizationSelectorComponent)
     },
     {
         path: 'data',
         title: 'Data',
-        component: DataComponent,
+        loadChildren: () =>
+            import('./pages/data/data.component').then(m => m.DataComponent)
     }
 ];
