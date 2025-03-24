@@ -6,7 +6,8 @@ import { MatButtonModule } from '@angular/material/button';
 import { SampleInfo } from '../../models/sample-info.model';
 import { MatTableModule } from '@angular/material/table';
 import { ExceedanceFractionService } from '../../services/exceedance-fraction/exceedance-fraction.service';
-
+import { ExposureGroupService } from '../../services/exposure-group/exposure-group.service';
+import { OrganizationService } from '../../services/organization/organization.service';
 
 @Component({
   selector: 'app-data',
@@ -22,6 +23,8 @@ import { ExceedanceFractionService } from '../../services/exceedance-fraction/ex
 })
 export class DataComponent {
   exceedanceFractionservice = inject(ExceedanceFractionService)
+  exposureGroupservice = inject(ExposureGroupService)
+  organizationservice = inject(OrganizationService)
   excelData!: SampleInfo[];
   exceedanceFraction!: number;
   columnsToDisplay = ['SampleNumber', 'SampleDate', 'ExposureGroup', 'TWA'];
@@ -45,7 +48,7 @@ export class DataComponent {
     };
     fileReader.readAsArrayBuffer(file);
   }
-  calculateexceedanceFraction() {
+  calculateExceedanceFraction() {
     const TWAlist: number[] = [];
     this.excelData
       //.filter(sample => sample.ExposureGroup === "TROUP MINING EQUIPMENT OPERATOR")
@@ -61,5 +64,10 @@ export class DataComponent {
 
     console.log(TWAlist);
     this.exceedanceFraction = this.exceedanceFractionservice.calculateExceedanceProbability(TWAlist, 0.05);
+  }
+  saveSampleInfo() {
+    const currentOrg = this.organizationservice.currentOrg;
+    if (!currentOrg) { throw new Error("No current organization") }
+    this.exposureGroupservice.saveSampleInfo(this.excelData, currentOrg.id, currentOrg.Name);
   }
 }

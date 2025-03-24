@@ -7,6 +7,7 @@ import { FormsModule } from '@angular/forms';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
 import { CommonModule } from '@angular/common';
+import { Organization } from '../../models/organization.model';
 
 @Component({
   selector: 'app-organization-selector',
@@ -39,7 +40,7 @@ export class OrganizationSelectorComponent {
     return null
 
   }
-  async setOrganization(org: string) {
+  async setOrganization(org: Organization) {
     console.log("setting org in component", org);
     this.organizationService.setCurrentOrg(org);
   }

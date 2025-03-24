@@ -5,6 +5,7 @@ import { collection } from 'firebase/firestore';
 import { Observable, of, switchMap } from 'rxjs';
 import { Firestore } from '@angular/fire/firestore'
 import { Auth, user } from '@angular/fire/auth';
+import { Organization } from '../../models/organization.model';
 
 @Injectable({
   providedIn: 'root'
@@ -12,7 +13,7 @@ import { Auth, user } from '@angular/fire/auth';
 export class OrganizationService {
   private firestore = inject(Firestore);
   private auth = inject(Auth);
-  currentOrg: any = null;
+  currentOrg: Organization | null = null;
   user$ = user(this.auth);
   private organizationList$ = this.user$.pipe(
     switchMap(user => user ? this.getOrganization() : of([]))
@@ -25,7 +26,7 @@ export class OrganizationService {
     return organizations;
   }
 
-  setCurrentOrg(org: any) {
+  setCurrentOrg(org: Organization) {
     this.currentOrg = org;
     console.log("setting org in service", org);
   }
