@@ -22,17 +22,23 @@ service cloud.firestore {
       allow create: if isLoggedIn();
       allow delete: if isCreator();
     }
+    
+    function isUserInOrganization(organizationResource) {
+      return true
+      && organizationResource.data.UserUids != null
+      && request.auth.uid in organizationResource.data.UserUids
+    }
     match /organizations/{organization} {
-      allow read, write: if isLoggedIn();
-      allow list: if isLoggedIn();
+      allow read: if isUserInOrganization(resource);
+      allow write: if isUserInOrganization(resource); 
+      allow delete: if isUserInOrganization(resource);
       allow create: if isLoggedIn();
-      allow delete: if isLoggedIn();
     }
     match /exposureGroups/{exposureGroup} {
-      allow read, write: if isLoggedIn();
-      allow list: if isLoggedIn();
+      allow read, write, delete: if resource.data != null
+                 && resource.data.organizationUid != null
+                 && isUserInOrganization(get(/databases/$(database)/documents/organizations/$(resource.data.OrganizationUid)))
       allow create: if isLoggedIn();
-      allow delete: if isLoggedIn();
     }
     match /breakdownTask/{task} {
       allow read, write: if isCreator();

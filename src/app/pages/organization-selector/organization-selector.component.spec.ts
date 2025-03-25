@@ -1,6 +1,6 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 
-import { OrganizationSelectorComponent } from './organization-selector.component';
+import { OrganizationSelectorComponent } from '../../services/organization/organization.service.spec';
 
 describe('OrganizationSelectorComponent', () => {
   let component: OrganizationSelectorComponent;
@@ -10,7 +10,7 @@ describe('OrganizationSelectorComponent', () => {
     await TestBed.configureTestingModule({
       imports: [OrganizationSelectorComponent]
     })
-    .compileComponents();
+      .compileComponents();
 
     fixture = TestBed.createComponent(OrganizationSelectorComponent);
     component = fixture.componentInstance;

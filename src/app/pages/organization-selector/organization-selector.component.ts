@@ -8,6 +8,7 @@ import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
 import { CommonModule } from '@angular/common';
 import { Organization } from '../../models/organization.model';
+import { Auth } from '@angular/fire/auth';
 
 @Component({
   selector: 'app-organization-selector',
@@ -24,24 +25,21 @@ export class OrganizationSelectorComponent {
     console.log("saving org", this.organizationName);
 
     try {
-      const newMessageRef = await addDoc(
-        collection(this.firestore, "organizations"),
-        {
-          Name: this.organizationName
-        },
-      );
-      return newMessageRef;
+      await this.organizationService.saveOrganization(this.organizationName);
+      this.organizationName = "";
+      return;
     } catch (error) {
       console.log("there was a problem saving orgs", error)
     }
     finally {
-      this.organizationName = "";
     }
     return null
 
   }
+
   async setOrganization(org: Organization) {
     console.log("setting org in component", org);
     this.organizationService.setCurrentOrg(org);
   }
+
 }

@@ -1,7 +1,7 @@
 import { Routes } from '@angular/router';
-import { OrganizationSelectorComponent } from './pages/organization-selector/organization-selector.component';
 import { HomeComponent } from './pages/home/home.component';
 import { DataComponent } from './pages/data/data.component';
+import { OrganizationSelectorComponent } from './pages/organization-selector/organization-selector.component';
 
 export const routes: Routes = [
     {
