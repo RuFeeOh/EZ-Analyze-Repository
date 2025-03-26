@@ -21,7 +21,7 @@ export class ExposureGroupService {
         OrganizationName: organizationName,
         Group: sampleInfo[0].ExposureGroup,
         ExposureGroup: sampleInfo[0].ExposureGroup,
-        // Results: sampleInfo,
+        Results: sampleInfo,
         LatestExceedanceFraction: new ExceedanceFraction({
           DateCalculated: new Date().toISOString(),
           OELNumber: 0.05, // Default value, can be adjusted as needed
