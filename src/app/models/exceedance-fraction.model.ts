@@ -1,4 +1,4 @@
-import { ExposureGroupResult } from "./exposure-group-result.model";
+import { SampleInfo } from "./sample-info.model";
 
 export class ExceedanceFraction {
     uid: string = "";
@@ -6,7 +6,7 @@ export class ExceedanceFraction {
     DateCalculated: string = new Date().toISOString();
     MostRecentNumber: number = 6;
     OELNumber: number = 0.05;
-    ResultsUsed: ExposureGroupResult[] = [];
+    ResultsUsed: SampleInfo[] = [];
     constructor(partial: Partial<ExceedanceFraction> = {}) {
         Object.assign(this, partial);
     }

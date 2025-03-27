@@ -45,26 +45,16 @@ export class DataComponent {
       const workbook = XLSX.read(data, { type: 'array' });
       const sheetName = workbook.SheetNames[0];
       this.excelData = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName]);
+      this.calculateExceedanceFraction();
     };
     fileReader.readAsArrayBuffer(file);
+
   }
   calculateExceedanceFraction() {
-    const TWAlist: number[] = [];
-    this.excelData
-      //.filter(sample => sample.ExposureGroup === "TROUP MINING EQUIPMENT OPERATOR")
-      .forEach((sample) => {
-        if (sample.TWA && +sample.TWA > 0) {
-          TWAlist.push(+sample.TWA)
-        } else if (+sample.TWA === 0) {
-          // throw new Error('Data contains zeros')
-          alert('Data contains zeros')
-        }
-
-      })
-
-    console.log(TWAlist);
+    const TWAlist: number[] = this.exposureGroupservice.getTWAListFromSampleInfo(this.excelData);
     this.exceedanceFraction = this.exceedanceFractionservice.calculateExceedanceProbability(TWAlist, 0.05);
   }
+
   saveSampleInfo() {
     const currentOrg = this.organizationservice.currentOrg;
     if (!currentOrg) { throw new Error("No current organization") }
