@@ -49,6 +49,24 @@ export class ExposureGroupService {
     }
   }
 
+
+  /**
+     * Separates an array of SampleInfo objects into groups based on their ExposureGroup.
+     * 
+     * @param sampleInfo An array of SampleInfo objects to be grouped
+     * @returns An object where keys are ExposureGroup names and values are arrays of corresponding SampleInfo objects
+     */
+  public separateSampleInfoByExposureGroup(sampleInfo: SampleInfo[]): { [key: string]: SampleInfo[] } {
+    const result: { [key: string]: SampleInfo[] } = {};
+    sampleInfo.forEach((sample) => {
+      if (!result[sample.ExposureGroup]) {
+        result[sample.ExposureGroup] = [];
+      }
+      result[sample.ExposureGroup].push(sample);
+    });
+    return result;
+  }
+
   private createExceedanceFraction(exceedanceFraction: number, TWAlist: number[], sampleInfo: SampleInfo[]) {
     return new ExceedanceFraction({
       ExceedanceFraction: exceedanceFraction,

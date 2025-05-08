@@ -44,13 +44,36 @@ export class DataComponent {
       const data = new Uint8Array(arrayBuffer);
       const workbook = XLSX.read(data, { type: 'array' });
       const sheetName = workbook.SheetNames[0];
-      this.excelData = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName]);
+      this.filterExcelDataForSilica(workbook, sheetName);
       this.calculateExceedanceFraction();
     };
     fileReader.readAsArrayBuffer(file);
 
   }
+  private filterExcelDataForSilica(workbook: XLSX.WorkBook, sheetName: string) {
+    const tempData: SampleInfo[] = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName]);
+    // filter only to iclude where Agent includes "silica, crystalline quartz"
+    const filteredData = tempData.filter((row: SampleInfo) => row.Agent?.toLowerCase().includes("silica, crystalline quartz"));
+    this.excelData = filteredData;
+  }
+
   calculateExceedanceFraction() {
+    //create a variable to separate the ExposureGroup column into an array
+    const exposureGroups: {
+      [key: string]: SampleInfo[];
+    } = this.exposureGroupservice.separateSampleInfoByExposureGroup(this.excelData);
+    //calculate the exceedance fraction for each ExposureGroup
+    for (const exposureGroupName in exposureGroups) {
+      const exposureGroup = exposureGroups[exposureGroupName];
+      if (exposureGroup.length === 1) {
+        continue;
+      }
+      const TWAlist: number[] = this.exposureGroupservice.getTWAListFromSampleInfo(exposureGroup);
+      const exceedanceFraction = this.exceedanceFractionservice.calculateExceedanceProbability(TWAlist, 0.05);
+      console.log(exposureGroupName, "||", exceedanceFraction, "||| length: ", exposureGroup.length);
+    }
+
+
     const TWAlist: number[] = this.exposureGroupservice.getTWAListFromSampleInfo(this.excelData);
     this.exceedanceFraction = this.exceedanceFractionservice.calculateExceedanceProbability(TWAlist, 0.05);
   }
