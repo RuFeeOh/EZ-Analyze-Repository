@@ -1,4 +1,4 @@
-import { computed, inject, Injectable, Signal } from '@angular/core';
+import { computed, inject, Injectable, OnInit, Signal } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { collectionData } from '@angular/fire/firestore';
 import { collection, addDoc, where, query } from 'firebase/firestore';
@@ -24,6 +24,17 @@ export class OrganizationService {
   )
   organizationList: Signal<any[]> = toSignal(this.organizationList$, { initialValue: [] })
 
+  constructor() {
+    this.loadCurrentOrganizationFromLocalStorage();
+  }
+
+  private loadCurrentOrganizationFromLocalStorage() {
+    const currentOrg = localStorage.getItem('currentOrg');
+    if (currentOrg) {
+      this.setCurrentOrg(JSON.parse(currentOrg));
+    }
+  }
+
   private getOrganizationList(): Observable<Organization[]> {
     const organizationCollection = collection(this.firestore, 'organizations');
     const userOrganizations = query(organizationCollection, where('UserUids', 'array-contains', this.userUid));
@@ -40,7 +51,7 @@ export class OrganizationService {
 
   setCurrentOrg(org: Organization) {
     this.currentOrg = org;
-    console.log("setting org in service", org);
+    localStorage.setItem('currentOrg', JSON.stringify(org));
   }
 
   public async saveOrganization(organizationName: string) {
@@ -53,6 +64,8 @@ export class OrganizationService {
       collection(this.firestore, "organizations"),
       this.plainObject(orgToSave)
     );
+    // Once the save is succesful, set the current organization
+    this.setCurrentOrg(orgToSave);
     return newMessageRef;
   }
 
