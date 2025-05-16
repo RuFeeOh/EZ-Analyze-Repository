@@ -1,5 +1,5 @@
 import { inject, Injectable } from '@angular/core';
-import { addDoc, collection } from 'firebase/firestore';
+import { addDoc, collection, getDocs, query, where, setDoc, doc } from 'firebase/firestore';
 import { SampleInfo } from '../../models/sample-info.model';
 import { Firestore } from '@angular/fire/firestore';
 import { ExposureGroup } from '../../models/exposure-group.model';
@@ -18,12 +18,47 @@ export class ExposureGroupService {
 
   async saveSampleInfo(sampleInfo: SampleInfo[], organizationUid: string, organizationName: string) {
     try {
-      const TWAlist: number[] = this.getTWAListFromSampleInfo(sampleInfo);
-      const exceedanceFraction = this.exceedanceFractionservice.calculateExceedanceProbability(TWAlist, 0.05);
-      alert(exceedanceFraction);
+      const groupedSampleInfo = this.separateSampleInfoByExposureGroup(sampleInfo);
 
-      const latestExceedanceFraction = this.createExceedanceFraction(exceedanceFraction, TWAlist, sampleInfo);
-      // Transform SampleInfo into ExposureGroup
+      for (const exposureGroupName in groupedSampleInfo) {
+        const groupSamples = groupedSampleInfo[exposureGroupName];
+        await this.processExposureGroup(groupSamples, organizationUid, organizationName);
+      }
+    } catch (error) {
+      console.log("There was a problem saving exposure group", error);
+      throw error;
+    }
+  }
+
+  private async processExposureGroup(sampleInfo: SampleInfo[], organizationUid: string, organizationName: string) {
+    const TWAlist: number[] = this.getTWAListFromSampleInfo(sampleInfo);
+    const exceedanceFraction = this.exceedanceFractionservice.calculateExceedanceProbability(TWAlist, 0.05);
+    alert(exceedanceFraction);
+
+    const latestExceedanceFraction = this.createExceedanceFraction(exceedanceFraction, TWAlist, sampleInfo);
+
+    const existingExposureGroups = await getDocs(query(
+      collection(this.firestore, 'exposureGroups'),
+      where('OrganizationUid', '==', organizationUid),
+      where('ExposureGroup', '==', sampleInfo[0].ExposureGroup)
+    ));
+
+    if (!existingExposureGroups.empty) {
+      const existingGroup = existingExposureGroups.docs[0].data();
+
+      const duplicateSample = this.checkForDuplicateSamples(existingGroup['Results'], sampleInfo);
+
+      if (duplicateSample) {
+        alert('Duplicate sample data found. Data will not be saved.');
+        throw new Error('Duplicate sample data found. Data will not be saved.');
+      }
+
+      existingGroup['Results'].push(...sampleInfo);
+      existingGroup['LatestExceedanceFraction'] = latestExceedanceFraction;
+      existingGroup['ExceedanceFractionHistory'].push(latestExceedanceFraction);
+
+      await setDoc(doc(this.firestore, 'exposureGroups', existingExposureGroups.docs[0].id), existingGroup);
+    } else {
       const exposureGroup = new ExposureGroup({
         OrganizationUid: organizationUid,
         OrganizationName: organizationName,
@@ -36,19 +71,15 @@ export class ExposureGroupService {
         ]
       });
 
-
-      const newMessageRef = await addDoc(
-        collection(this.firestore, "exposureGroups"),
-        JSON.parse(JSON.stringify(exposureGroup)), // Convert to plain object for Firestore
-      );
-
-      return newMessageRef;
-    } catch (error) {
-      console.log("There was a problem saving exposure group", error);
-      throw error;
+      await addDoc(collection(this.firestore, 'exposureGroups'), JSON.parse(JSON.stringify(exposureGroup)));
     }
   }
 
+  private checkForDuplicateSamples(existingSamples: SampleInfo[], newSamples: SampleInfo[]): boolean {
+    return existingSamples.some((existingSample: SampleInfo) =>
+      newSamples.some(newSample => newSample.SampleNumber === existingSample.SampleNumber)
+    );
+  }
 
   /**
      * Separates an array of SampleInfo objects into groups based on their ExposureGroup.
