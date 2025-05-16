@@ -1,12 +1,16 @@
 import { CommonModule } from '@angular/common';
 import { Component, inject } from '@angular/core';
 import { Auth, GoogleAuthProvider, signInWithPopup, signOut, user } from '@angular/fire/auth';
+import { MatButtonModule } from '@angular/material/button';
 import { Router } from '@angular/router';
 
 
 @Component({
   selector: 'app-login',
-  imports: [CommonModule],
+  imports: [
+    CommonModule,
+    MatButtonModule,
+  ],
   templateUrl: './login.component.html',
   styleUrl: './login.component.scss',
 })

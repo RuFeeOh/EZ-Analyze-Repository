@@ -1,3 +1,7 @@
+@if(isLoggedIn()){
+<app-header></app-header>
+}
+
 <mat-drawer-container class="example-container">
 
     @if(isLoggedIn()){
@@ -5,7 +9,6 @@
                 opened>
 
         <mat-nav-list>
-            currentOrg: {{organizationService.currentOrg()?.Name}}
             <a mat-list-item
                routerLink="/home"
                routerLinkActive="mdc-list-item--activated">Home</a>

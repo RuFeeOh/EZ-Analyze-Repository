@@ -9,6 +9,7 @@ import { Auth, User, user } from '@angular/fire/auth';
 import { Observable } from 'rxjs';
 import { map } from 'rxjs/operators';
 import { toSignal } from '@angular/core/rxjs-interop';
+import { HeaderComponent } from './features/header/header.component';
 
 @Component({
   selector: 'app-root',
@@ -19,7 +20,7 @@ import { toSignal } from '@angular/core/rxjs-interop';
     MatButtonModule,
     MatSidenavModule,
     MatListModule,
-    LoginComponent,
+    HeaderComponent,
   ],
   templateUrl: './app.component.html',
   styleUrl: './app.component.scss'
