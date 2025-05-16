@@ -1,6 +1,7 @@
 import { CommonModule } from '@angular/common';
-import { Component } from '@angular/core';
+import { Component, inject } from '@angular/core';
 import { Auth, GoogleAuthProvider, signInWithPopup, signOut, user } from '@angular/fire/auth';
+import { Router } from '@angular/router';
 
 
 @Component({
@@ -10,13 +11,16 @@ import { Auth, GoogleAuthProvider, signInWithPopup, signOut, user } from '@angul
   styleUrl: './login.component.scss',
 })
 export class LoginComponent {
+  private router = inject(Router);
   public user;
   constructor(public auth: Auth) {
     this.user = user(this.auth)
   }
 
-  login() {
-    signInWithPopup(this.auth, new GoogleAuthProvider());
+  async login() {
+    await signInWithPopup(this.auth, new GoogleAuthProvider());
+    // navigate to home page
+    this.router.navigate(['/home']);
   }
 
   logout() {

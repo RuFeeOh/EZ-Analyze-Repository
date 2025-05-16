@@ -1,4 +1,4 @@
-import { computed, inject, Injectable, OnInit, Signal } from '@angular/core';
+import { computed, effect, inject, Injectable, linkedSignal, OnInit, Signal, WritableSignal } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { collectionData } from '@angular/fire/firestore';
 import { collection, addDoc, where, query } from 'firebase/firestore';
@@ -13,7 +13,6 @@ import { Organization } from '../../models/organization.model';
 export class OrganizationService {
   private firestore = inject(Firestore);
   private auth = inject(Auth);
-  currentOrg: Organization | null = null;
   user$ = user(this.auth);
   private user = toSignal(this.user$, { initialValue: null });
   private get userUid() {
@@ -24,15 +23,29 @@ export class OrganizationService {
   )
   organizationList: Signal<any[]> = toSignal(this.organizationList$, { initialValue: [] })
 
-  constructor() {
-    this.loadCurrentOrganizationFromLocalStorage();
-  }
-
-  private loadCurrentOrganizationFromLocalStorage() {
-    const currentOrg = localStorage.getItem('currentOrg');
-    if (currentOrg) {
-      this.setCurrentOrg(JSON.parse(currentOrg));
+  public currentOrg: WritableSignal<Organization | null> = linkedSignal({
+    source: this.organizationList,
+    computation: (orgList) => {
+      const storedCurrentOrg = localStorage.getItem('currentOrg');
+      if (storedCurrentOrg) {
+        const parsedOrg = JSON.parse(storedCurrentOrg);
+        return orgList.find((org) => org.Uid === parsedOrg.Uid) || null;
+      } else if (orgList.length === 1) {
+        // If there is only one organization, set it as the current organization
+        const singleOrg = orgList[0];
+        return singleOrg;
+      }
+      return null;
     }
+  });
+
+  constructor() {
+    effect(() => {
+      const currentOrg = this.currentOrg();
+      if (currentOrg) {
+        localStorage.setItem('currentOrg', JSON.stringify(currentOrg));
+      }
+    })
   }
 
   private getOrganizationList(): Observable<Organization[]> {
@@ -50,7 +63,7 @@ export class OrganizationService {
   }
 
   setCurrentOrg(org: Organization) {
-    this.currentOrg = org;
+    this.currentOrg.set(org);;
     localStorage.setItem('currentOrg', JSON.stringify(org));
   }
 

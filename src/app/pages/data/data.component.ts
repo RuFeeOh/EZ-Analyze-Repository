@@ -79,7 +79,7 @@ export class DataComponent {
   }
 
   saveSampleInfo() {
-    const currentOrg = this.organizationservice.currentOrg;
+    const currentOrg = this.organizationservice.currentOrg();
     if (!currentOrg) { throw new Error("No current organization") }
     this.exposureGroupservice.saveSampleInfo(this.excelData, currentOrg.Uid, currentOrg.Name);
   }
