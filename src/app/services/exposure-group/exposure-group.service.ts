@@ -24,6 +24,8 @@ export class ExposureGroupService {
         const groupSamples = groupedSampleInfo[exposureGroupName];
         await this.processExposureGroup(groupSamples, organizationUid, organizationName);
       }
+      return groupedSampleInfo; // Return the processed group
+
     } catch (error) {
       console.log("There was a problem saving exposure group", error);
       throw error;

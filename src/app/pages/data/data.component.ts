@@ -10,7 +10,9 @@ import { ExposureGroupService } from '../../services/exposure-group/exposure-gro
 import { OrganizationService } from '../../services/organization/organization.service';
 import { TableComponent } from '../../features/ez-table/table.component';
 import { EzTableColumn } from '../../models/ez-table-column.model';
-import { MatSnackBar } from '@angular/material/snack-bar';
+import { MatSnackBar, MatSnackBarConfig, MatSnackBarRef } from '@angular/material/snack-bar';
+import { Organization } from '../../models/organization.model';
+import { GroupedExposureGroups } from '../../models/grouped-exposure-groups.model';
 
 @Component({
   selector: 'ez-data',
@@ -29,6 +31,7 @@ export class DataComponent {
   private exposureGroupservice = inject(ExposureGroupService);
   private organizationservice = inject(OrganizationService);
   private snackBar = inject(MatSnackBar);
+  private saveMessageRef: MatSnackBarRef<any> | undefined;
   excelData!: SampleInfo[];
   exceedanceFraction!: number;
   public columnsToDisplay: EzTableColumn[] = [
@@ -82,14 +85,81 @@ export class DataComponent {
   async saveSampleInfo() {
     const currentOrg = this.organizationservice.currentOrg();
     if (!currentOrg) {
+      this.showNoOrganizationMessage();
       throw new Error("No current organization");
     }
+    if (!this.excelData || this.excelData.length === 0) {
+      this.showNoDataMessage();
+      throw new Error("No data uploaded");
+    }
+    await this.saveSampleInfoToDB(currentOrg);
 
-    await this.exposureGroupservice.saveSampleInfo(this.excelData, currentOrg.Uid, currentOrg.Name);
+  }
 
-    const exposureGroupCount = this.excelData.length; // Assuming excelData contains the exposure groups
-    this.snackBar.open(`Saved ${exposureGroupCount} exposureGroups`, 'Close', {
-      duration: 3000,
+  private async saveSampleInfoToDB(currentOrg: Organization) {
+    let groupedExposureGroups: GroupedExposureGroups;
+    try {
+      this.showSaving();
+      groupedExposureGroups = await this.exposureGroupservice.saveSampleInfo(this.excelData, currentOrg.Uid, currentOrg.Name);
+      this.hideSaving();
+      this.saveSampleInfoToDBSuccessResponse(groupedExposureGroups);
+    } catch (error) {
+      this.saveSampleInfoToDBErrorResponse(error);
+      throw new Error(error as string);
+    } finally {
+      this.hideSaving();
+    }
+  }
+
+  private saveSampleInfoToDBErrorResponse(error: unknown) {
+    console.error("Error saving sample info:", error);
+    this.snackBar.open('Error saving data. Please try again.', 'Close', {
+      duration: 10000,
     });
+  }
+
+  private showSaving() {
+    const config: MatSnackBarConfig = {
+      duration: 10000,
+      panelClass: ['snackbar-saving'],
+      horizontalPosition: 'center',
+      verticalPosition: 'top',
+    }
+    this.saveMessageRef = this.snackBar.open('Saving data...', 'Close', config);
+  }
+
+  private saveSampleInfoToDBSuccessResponse(groupedExposureGroups: GroupedExposureGroups) {
+    const message = this.getSaveSuccessMessage(groupedExposureGroups);
+    this.snackBar.open(message, 'Close', {
+      duration: 10000,
+      panelClass: ['snackbar-success'],
+    });
+  }
+
+  private hideSaving() {
+    // this.saveMessageRef && this.saveMessageRef.dismiss();
+  }
+
+  private showNoDataMessage() {
+    this.snackBar.open('No data to save. Please upload a file first.', 'Close', {
+      duration: 10000,
+    });
+  }
+
+  private getSaveSuccessMessage(groupedExposureGroups: GroupedExposureGroups) {
+    const exposureGroupCount = Object.keys(groupedExposureGroups)?.length || 0; // Assuming excelData contains the exposure groups
+    const sampleCount = this.excelData.length;
+    const sampleCountText = (sampleCount > 1 ? 'samples' : 'sample');
+    const sampleCountMessage = `${sampleCount} ${sampleCountText}`;
+    const exposureGroupMessage = `${exposureGroupCount} exposure groups`;
+    const message = `${exposureGroupMessage} saved (${sampleCountMessage}).`;
+    return message;
+  }
+
+  private showNoOrganizationMessage() {
+    this.snackBar.open('No current organization. Please select an organization first.', 'Close', {
+      duration: 10000,
+    });
+    throw new Error("No current organization");
   }
 }

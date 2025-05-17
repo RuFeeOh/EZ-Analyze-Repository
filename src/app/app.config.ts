@@ -7,6 +7,7 @@ import { initializeApp, provideFirebaseApp } from '@angular/fire/app';
 import { provideAuth, getAuth, connectAuthEmulator } from '@angular/fire/auth';
 import { provideFirestore, getFirestore, connectFirestoreEmulator } from '@angular/fire/firestore';
 import { environment } from '../environments/environment';
+import { MAT_SNACK_BAR_DEFAULT_OPTIONS } from '@angular/material/snack-bar';
 
 export const appConfig: ApplicationConfig = {
   providers: [
@@ -23,5 +24,13 @@ export const appConfig: ApplicationConfig = {
     }),
     provideAuth(() => getAuth()),
     provideFirestore(() => getFirestore()),
+    {
+      provide: MAT_SNACK_BAR_DEFAULT_OPTIONS,
+      useValue: {
+        horizontalPosition: 'center',
+        verticalPosition: 'top',
+        duration: 3000, // Default duration for all snackbars
+      },
+    },
   ]
 };
