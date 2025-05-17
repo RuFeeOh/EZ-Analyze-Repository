@@ -11,7 +11,7 @@ import { Organization } from '../../models/organization.model';
 import { Auth } from '@angular/fire/auth';
 
 @Component({
-  selector: 'app-organization-selector',
+  selector: 'ez-organization-selector',
   imports: [MatButtonModule, FormsModule, MatFormFieldModule, MatInputModule, CommonModule],
   templateUrl: './organization-selector.component.html',
   styleUrl: './organization-selector.component.scss'

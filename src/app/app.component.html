@@ -1,33 +1,33 @@
 @if(isLoggedIn()){
-<app-header></app-header>
+<ez-header></ez-header>
 }
 
 <mat-drawer-container class="example-container">
 
-    @if(isLoggedIn()){
-    <mat-drawer mode="side"
-                opened>
+   @if(isLoggedIn()){
+   <mat-drawer mode="side"
+               opened>
 
-        <mat-nav-list>
-            <a mat-list-item
-               routerLink="/home"
-               routerLinkActive="mdc-list-item--activated">Home</a>
-            <a mat-list-item
-               routerLink="/org"
-               routerLinkActive="mdc-list-item--activated">Org</a>
-            <a mat-list-item
-               routerLink="/data"
-               routerLinkActive="mdc-list-item--activated">Data</a>
-            <a mat-list-item
-               routerLink="/exceedance-fraction"
-               routerLinkActive="mdc-list-item--activated">
-                Exceedance Fractions
-            </a><a mat-list-item
-               routerLink="/insights"
-               routerLinkActive="mdc-list-item--activated">Insights</a>
-        </mat-nav-list>
-    </mat-drawer>
-    }
-    <mat-drawer-content><router-outlet /></mat-drawer-content>
+      <mat-nav-list>
+         <a mat-list-item
+            routerLink="/home"
+            routerLinkActive="mdc-list-item--activated">Home</a>
+         <a mat-list-item
+            routerLink="/org"
+            routerLinkActive="mdc-list-item--activated">Org</a>
+         <a mat-list-item
+            routerLink="/data"
+            routerLinkActive="mdc-list-item--activated">Data</a>
+         <a mat-list-item
+            routerLink="/exceedance-fraction"
+            routerLinkActive="mdc-list-item--activated">
+            Exceedance Fractions
+         </a><a mat-list-item
+            routerLink="/insights"
+            routerLinkActive="mdc-list-item--activated">Insights</a>
+      </mat-nav-list>
+   </mat-drawer>
+   }
+   <mat-drawer-content><router-outlet /></mat-drawer-content>
 
 </mat-drawer-container>

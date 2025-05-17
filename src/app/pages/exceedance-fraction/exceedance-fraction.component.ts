@@ -1,7 +1,7 @@
 import { Component } from '@angular/core';
 
 @Component({
-  selector: 'app-exceedance-fraction',
+  selector: 'ez-exceedance-fraction',
   imports: [],
   templateUrl: './exceedance-fraction.component.html',
   styleUrl: './exceedance-fraction.component.scss'

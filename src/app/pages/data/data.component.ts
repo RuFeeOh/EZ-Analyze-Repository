@@ -8,41 +8,42 @@ import { MatTableModule } from '@angular/material/table';
 import { ExceedanceFractionService } from '../../services/exceedance-fraction/exceedance-fraction.service';
 import { ExposureGroupService } from '../../services/exposure-group/exposure-group.service';
 import { OrganizationService } from '../../services/organization/organization.service';
+import { TableComponent } from '../../features/ez-table/table.component';
+import { EzTableColumn } from '../../models/ez-table-column.model';
+import { MatSnackBar } from '@angular/material/snack-bar';
 
 @Component({
-  selector: 'app-data',
+  selector: 'ez-data',
   imports: [
     CommonModule,
     MatIconModule,
     MatButtonModule,
     MatTableModule,
-
+    TableComponent
   ],
   templateUrl: './data.component.html',
   styleUrl: './data.component.scss'
 })
 export class DataComponent {
-  exceedanceFractionservice = inject(ExceedanceFractionService)
-  exposureGroupservice = inject(ExposureGroupService)
-  organizationservice = inject(OrganizationService)
+  private exceedanceFractionservice = inject(ExceedanceFractionService);
+  private exposureGroupservice = inject(ExposureGroupService);
+  private organizationservice = inject(OrganizationService);
+  private snackBar = inject(MatSnackBar);
   excelData!: SampleInfo[];
   exceedanceFraction!: number;
-  columnsToDisplay = ['SampleNumber', 'SampleDate', 'ExposureGroup', 'TWA'];
-  columnsToDisplayWithExpand = [...this.columnsToDisplay, 'expand'];
-  expandedElement!: SampleInfo | null;
-  isExpanded(element: SampleInfo) {
-    return this.expandedElement === element;
-  }
-  toggle(element: SampleInfo) {
-    this.expandedElement = this.isExpanded(element) ? null : element;
-  }
+  public columnsToDisplay: EzTableColumn[] = [
+    new EzTableColumn({ Name: 'SampleNumber', DisplayName: 'Sample Number', Type: 'string' }),
+    new EzTableColumn({ Name: 'SampleDate', DisplayName: 'Sample Date', Type: 'date' }),
+    new EzTableColumn({ Name: 'ExposureGroup', DisplayName: 'Exposure Group', Type: 'string' }),
+    new EzTableColumn({ Name: 'TWA', DisplayName: 'TWA', Type: 'number' })
+  ];
   onFileChange(event: any) {
     const file = event.target.files[0];
     const fileReader = new FileReader();
     fileReader.onload = (e) => {
       const arrayBuffer: any = fileReader.result;
       const data = new Uint8Array(arrayBuffer);
-      const workbook = XLSX.read(data, { type: 'array' });
+      const workbook = XLSX.read(data, { type: 'array', cellDates: true }); // Ensure dates are read as dates
       const sheetName = workbook.SheetNames[0];
       this.filterExcelDataForSilica(workbook, sheetName);
       this.calculateExceedanceFraction();
@@ -78,9 +79,17 @@ export class DataComponent {
     this.exceedanceFraction = this.exceedanceFractionservice.calculateExceedanceProbability(TWAlist, 0.05);
   }
 
-  saveSampleInfo() {
+  async saveSampleInfo() {
     const currentOrg = this.organizationservice.currentOrg();
-    if (!currentOrg) { throw new Error("No current organization") }
-    this.exposureGroupservice.saveSampleInfo(this.excelData, currentOrg.Uid, currentOrg.Name);
+    if (!currentOrg) {
+      throw new Error("No current organization");
+    }
+
+    await this.exposureGroupservice.saveSampleInfo(this.excelData, currentOrg.Uid, currentOrg.Name);
+
+    const exposureGroupCount = this.excelData.length; // Assuming excelData contains the exposure groups
+    this.snackBar.open(`Saved ${exposureGroupCount} exposureGroups`, 'Close', {
+      duration: 3000,
+    });
   }
 }

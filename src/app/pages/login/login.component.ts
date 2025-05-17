@@ -6,7 +6,7 @@ import { Router } from '@angular/router';
 
 
 @Component({
-  selector: 'app-login',
+  selector: 'ez-login',
   imports: [
     CommonModule,
     MatButtonModule,

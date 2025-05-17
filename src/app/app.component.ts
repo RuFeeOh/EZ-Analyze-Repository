@@ -12,7 +12,7 @@ import { toSignal } from '@angular/core/rxjs-interop';
 import { HeaderComponent } from './features/header/header.component';
 
 @Component({
-  selector: 'app-root',
+  selector: 'ez-root',
   imports: [
     RouterOutlet,
     RouterLink,
