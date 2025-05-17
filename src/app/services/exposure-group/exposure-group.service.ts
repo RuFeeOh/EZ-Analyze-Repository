@@ -1,5 +1,5 @@
 import { inject, Injectable } from '@angular/core';
-import { addDoc, collection, getDocs, query, where, setDoc, doc } from 'firebase/firestore';
+import { addDoc, collection, getDocs, query, where, setDoc, doc, updateDoc, QuerySnapshot, CollectionReference } from 'firebase/firestore';
 import { SampleInfo } from '../../models/sample-info.model';
 import { Firestore } from '@angular/fire/firestore';
 import { ExposureGroup } from '../../models/exposure-group.model';
@@ -33,18 +33,22 @@ export class ExposureGroupService {
   private async processExposureGroup(sampleInfo: SampleInfo[], organizationUid: string, organizationName: string) {
     const TWAlist: number[] = this.getTWAListFromSampleInfo(sampleInfo);
     const exceedanceFraction = this.exceedanceFractionservice.calculateExceedanceProbability(TWAlist, 0.05);
-    alert(exceedanceFraction);
 
     const latestExceedanceFraction = this.createExceedanceFraction(exceedanceFraction, TWAlist, sampleInfo);
 
-    const existingExposureGroups = await getDocs(query(
-      collection(this.firestore, 'exposureGroups'),
+    if (!organizationUid || !sampleInfo[0]?.ExposureGroup) {
+      throw new Error('Invalid organizationUid or ExposureGroup is undefined.');
+    }
+
+    const existingExposureGroups: QuerySnapshot<ExposureGroup> = await getDocs(query(
+      collection(this.firestore, 'exposureGroups') as CollectionReference<ExposureGroup>,
+      where('ExposureGroup', '==', sampleInfo[0].ExposureGroup),
       where('OrganizationUid', '==', organizationUid),
-      where('ExposureGroup', '==', sampleInfo[0].ExposureGroup)
     ));
 
     if (!existingExposureGroups.empty) {
-      const existingGroup = existingExposureGroups.docs[0].data();
+      const existingGroup: ExposureGroup = existingExposureGroups.docs[0].data();
+      const documentId = existingExposureGroups.docs[0].id; // Use document ID directly
 
       const duplicateSample = this.checkForDuplicateSamples(existingGroup['Results'], sampleInfo);
 
@@ -53,11 +57,16 @@ export class ExposureGroupService {
         throw new Error('Duplicate sample data found. Data will not be saved.');
       }
 
-      existingGroup['Results'].push(...sampleInfo);
-      existingGroup['LatestExceedanceFraction'] = latestExceedanceFraction;
-      existingGroup['ExceedanceFractionHistory'].push(latestExceedanceFraction);
+      const results = existingGroup.Results.concat(...sampleInfo);
+      const exceedanceFractionHistory = existingGroup.ExceedanceFractionHistory.concat(latestExceedanceFraction);
 
-      await setDoc(doc(this.firestore, 'exposureGroups', existingExposureGroups.docs[0].id), existingGroup);
+      const docUpdate = this.makeObjectPlain({
+        Results: results,
+        LatestExceedanceFraction: latestExceedanceFraction,
+        ExceedanceFractionHistory: exceedanceFractionHistory,
+      });
+
+      await updateDoc(doc(this.firestore, 'exposureGroups', documentId), docUpdate);
     } else {
       const exposureGroup = new ExposureGroup({
         OrganizationUid: organizationUid,
@@ -71,13 +80,17 @@ export class ExposureGroupService {
         ]
       });
 
-      await addDoc(collection(this.firestore, 'exposureGroups'), JSON.parse(JSON.stringify(exposureGroup)));
+      await addDoc(collection(this.firestore, 'exposureGroups'), this.makeObjectPlain(exposureGroup));
     }
+  }
+
+  private makeObjectPlain(obj: any) {
+    return JSON.parse(JSON.stringify(obj));
   }
 
   private checkForDuplicateSamples(existingSamples: SampleInfo[], newSamples: SampleInfo[]): boolean {
     return existingSamples.some((existingSample: SampleInfo) =>
-      newSamples.some(newSample => newSample.SampleNumber === existingSample.SampleNumber)
+      newSamples.some(newSample => !!newSample.SampleNumber && newSample.SampleNumber === existingSample.SampleNumber)
     );
   }
 

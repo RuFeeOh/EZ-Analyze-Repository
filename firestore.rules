@@ -28,17 +28,37 @@ service cloud.firestore {
       && organizationResource.data.UserUids != null
       && request.auth.uid in organizationResource.data.UserUids
     }
+
+    /**
+      * use the exposureGroupId from the url to get the exposureGroup, then the organization
+      * then the organizationUid to see if the user is in the organization
+      * @return {boolean} - True if the user has access, false otherwise
+      */
+    function doesUserHaveAccessToExposureGroup(exposureGroupId) {
+      // get the exposureGroup from the database
+      let exposureGroup = get(/databases/$(database)/documents/exposureGroups/$(exposureGroupId));
+      // get the organizationUid from the exposureGroup
+      let organizationUid = exposureGroup.data.OrganizationUid;
+      // get the organization from the database
+      let organization = get(/databases/$(database)/documents/organizations/$(organizationUid));
+      // check if the user is in the organization
+      return isUserInOrganization(organization);
+    }
+
     match /organizations/{organization} {
       allow read: if isUserInOrganization(resource);
       allow write: if isUserInOrganization(resource); 
       allow delete: if isUserInOrganization(resource);
       allow create: if isLoggedIn();
     }
-    match /exposureGroups/{exposureGroup} {
-      allow read, write, delete: if resource.data != null
-                 && resource.data.organizationUid != null
-                 && isUserInOrganization(get(/databases/$(database)/documents/organizations/$(resource.data.OrganizationUid)))
+    match /exposureGroups/{exposureGroupId} {
+        allow update: if doesUserHaveAccessToExposureGroup(exposureGroupId);
       allow create: if isLoggedIn();
+      allow list: if isLoggedIn(); // Allow listing only for logged-in users
+      allow read, delete: if resource.data != null
+                 && resource.data.get("OrganizationUid", null) != null
+                 && isUserInOrganization(get(/databases/$(database)/documents/organizations/$(resource.data.organizationUid)));
+    
     }
     match /breakdownTask/{task} {
       allow read, write: if isCreator();
