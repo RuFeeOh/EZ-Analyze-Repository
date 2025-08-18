@@ -18,6 +18,8 @@ export class ExposureGroupsComponent {
     private firestore = inject(Firestore);
     private orgService = inject(OrganizationService);
     exposureGroups$!: Observable<any[]>;
+    // Accessor used by ez-table to get detail rows for a group
+    readonly detailForFn = (group: any) => group?.Results ?? [];
 
     constructor() {
         const ref = collection(this.firestore, 'exposureGroups');

@@ -1,1 +1,7 @@
-<ez-table [data]="(exposureGroups$ | async) ?? []"></ez-table>
+<ez-table [items]="(exposureGroups$ | async) ?? []"
+          [summaryColumns]="[
+		{ Name: 'ExposureGroup', DisplayName: 'Exposure Group' },
+		{ Name: 'Samples', DisplayName: 'Samples' }
+	]"
+          [detailColumns]="['SampleDate','ExposureGroup','TWA','Notes','SampleNumber']"
+          [detailFor]="detailForFn"></ez-table>

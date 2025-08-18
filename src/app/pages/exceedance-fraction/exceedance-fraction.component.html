@@ -1,3 +1,4 @@
-<ez-table [displayedColumns]="defaultColumns"
-          [data]="(exposureGroups$ | async) ?? []"
-          detailSource="ef" />
+<ez-table [items]="(exposureGroups$ | async) ?? []"
+          [summaryColumns]="efSummaryColumns"
+          [detailColumns]="efDetailColumns"
+          [detailFor]="efDetailFor" />

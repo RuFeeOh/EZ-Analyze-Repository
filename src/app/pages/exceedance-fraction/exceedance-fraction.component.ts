@@ -24,8 +24,14 @@ export class ExceedanceFractionComponent {
   private orgService = inject(OrganizationService);
   exposureGroups$!: Observable<any[]>;
   resultsData: SampleInfo[] = [];
-  // Columns shown for detail rows of EF (inputs used)
-  defaultColumns: string[] = ['SampleDate', 'ExposureGroup', 'TWA', 'Notes', 'SampleNumber'];
+  // Table configuration for ez-table (generic)
+  readonly efSummaryColumns = [
+    new EzColumn({ Name: 'ExposureGroup', DisplayName: 'Exposure Group' }),
+    new EzColumn({ Name: 'Samples', DisplayName: 'Samples Used' }),
+    new EzColumn({ Name: 'LatestEF', DisplayName: 'Latest EF', Format: 'percent' })
+  ];
+  readonly efDetailColumns: string[] = ['SampleDate', 'ExposureGroup', 'TWA', 'Notes', 'SampleNumber'];
+  readonly efDetailFor = (group: any) => group?.LatestExceedanceFraction?.ResultsUsed ?? [];
 
   constructor() {
     const ref = collection(this.firestore, 'exposureGroups');

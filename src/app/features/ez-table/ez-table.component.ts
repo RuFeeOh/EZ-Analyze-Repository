@@ -22,17 +22,29 @@ import { EzColumn } from '../../models/ez-column.model';
   styleUrl: './ez-table.component.scss'
 })
 export class EzTableComponent implements AfterViewInit {
-  // Accept either simple string keys or EzColumn models
-  displayedColumns = input<(string | EzColumn)[]>(['SampleDate', 'ExposureGroup', 'TWA', 'Notes', 'SampleNumber'])
+  // Generic configuration
+  // - summaryColumns: rendered for the top-level rows (items)
+  // - detailColumns: rendered for the expanded detail rows (detail items)
+  // - items: the top-level rows (array of any)
+  // - detailFor: function to get detail items for an item
+  // Back-compat: if items not provided, it can derive a flat table from dataResults; if items provided, old data input is ignored.
+  summaryColumns = input<(string | EzColumn)[]>([]);
+  detailColumns = input<(string | EzColumn)[]>([]);
+  items = input<any[]>([]);
+  detailFor = input<(item: any) => any[] | undefined>();
+
+  // Deprecated/back-compat inputs (will be removed when callers migrate)
+  displayedColumns = input<(string | EzColumn)[]>(['SampleDate', 'ExposureGroup', 'TWA', 'Notes', 'SampleNumber']);
   data = input<ExposureGroup[]>([]);
   dataResults = input<SampleInfo[]>([]);
-  // Controls where the expanded details pull from: group.Results or LatestExceedanceFraction.ResultsUsed
   detailSource = input<'group' | 'ef'>('group');
 
   @ViewChild(MatPaginator) paginator!: MatPaginator;
   paginatorSignal: WritableSignal<MatPaginator | null> = signal(null);
   // Resolve string IDs for columns to satisfy MatTable APIs
   columnIds = computed(() => (this.displayedColumns() ?? []).map(c => typeof c === 'string' ? c : c.Name));
+  summaryColumnIds = computed(() => (this.summaryColumns()?.length ? this.summaryColumns() : this.defaultSummaryColumns()).map(c => typeof c === 'string' ? c : c.Name));
+  detailColumnIds = computed(() => (this.detailColumns()?.length ? this.detailColumns() : this.displayedColumns()).map(c => typeof c === 'string' ? c : c.Name));
   // DataSource for flat SampleInfo rows mode
   dataTableSource = computed(() => {
     let mappedData = [];
@@ -48,20 +60,22 @@ export class EzTableComponent implements AfterViewInit {
     return dataSource;
   });
 
-  // DataSource for group rows (expandable)
+  // DataSource for generic items (expandable)
   groupTableSource = computed(() => {
-    const groups = this.data() ?? [];
-    const dataSource = new MatTableDataSource<ExposureGroup>(groups);
+    const groups = (this.items()?.length ? this.items() : (this.data() ?? []));
+    const dataSource = new MatTableDataSource<any>(groups);
     if (this.paginatorSignal()) {
       dataSource.paginator = this.paginatorSignal();
     }
     return dataSource;
   });
 
-  // Columns for the group table (expand + summary columns)
-  readonly groupColumns: string[] = ['expand', 'ExposureGroup', 'Samples', 'LatestEF'];
+  // Columns for the group table (expand + configured summary columns)
+  get groupColumns(): string[] {
+    return ['expand', ...this.summaryColumnIds()];
+  }
 
-  expandedGroup: ExposureGroup | null = null;
+  expandedGroup: any | null = null;
 
   ngAfterViewInit() {
     this.paginatorSignal.set(this.paginator);
@@ -100,5 +114,78 @@ export class EzTableComponent implements AfterViewInit {
 
   columnHeader(col: string | EzColumn): string {
     return typeof col === 'string' ? col : (col.DisplayName || col.Name);
+  }
+
+  // Resolve values for summary/detail cells
+  valueFor(item: any, col: string | EzColumn, section: 'summary' | 'detail'): any {
+    const key = this.columnId(col);
+    // Special handling for common group fields when using defaults
+    if (key === 'ExposureGroup') {
+      return item?.ExposureGroup ?? item?.Group ?? '';
+    }
+    if (key === 'Samples') {
+      if (this.detailSource() === 'ef') {
+        return item?.LatestExceedanceFraction?.ResultsUsed?.length ?? 0;
+      }
+      return item?.Results?.length ?? 0;
+    }
+    if (key === 'LatestEF') {
+      return item?.LatestExceedanceFraction?.ExceedanceFraction ?? 0;
+    }
+    // Default: property lookup
+    return item?.[key];
+  }
+
+  formatValue(value: any, col: string | EzColumn): string {
+    const fmt = typeof col === 'string' ? undefined : col.Format;
+    if (fmt === 'percent') {
+      const num = typeof value === 'number' ? value : Number(value ?? 0);
+      return new Intl.NumberFormat(undefined, { style: 'percent', minimumFractionDigits: 1, maximumFractionDigits: 2 }).format(num);
+    }
+    if (fmt === 'number') {
+      const num = typeof value === 'number' ? value : Number(value ?? 0);
+      return new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(num);
+    }
+    if (fmt === 'date') {
+      const d = value ? new Date(value) : null;
+      return d ? d.toLocaleDateString() : '';
+    }
+    return value ?? '';
+  }
+
+  detailsForItem(item: any): any[] {
+    const accessor = this.detailFor();
+    if (accessor) {
+      try {
+        return accessor(item) ?? [];
+      } catch {
+        return [];
+      }
+    }
+    if (this.detailSource() === 'ef') {
+      return item?.LatestExceedanceFraction?.ResultsUsed ?? [];
+    }
+    return item?.Results ?? [];
+  }
+
+  public defaultSummaryColumns(): (string | EzColumn)[] {
+    // Fallback to sensible defaults when not provided
+    if (this.data()?.length && this.detailSource() === 'ef') {
+      // Exposure group + samples used + Latest EF
+      return [
+        new EzColumn({ Name: 'ExposureGroup', DisplayName: 'Exposure Group' }),
+        new EzColumn({ Name: 'Samples', DisplayName: 'Samples Used' }),
+        new EzColumn({ Name: 'LatestEF', DisplayName: 'Latest EF', Format: 'percent' })
+      ];
+    }
+    if (this.data()?.length) {
+      // Exposure groups view
+      return [
+        new EzColumn({ Name: 'ExposureGroup', DisplayName: 'Exposure Group' }),
+        new EzColumn({ Name: 'Samples', DisplayName: 'Samples' })
+      ];
+    }
+    // Flat table has no summary concept
+    return [];
   }
 }

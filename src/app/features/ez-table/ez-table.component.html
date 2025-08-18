@@ -1,5 +1,5 @@
-<!-- If exposure group data provided, show expandable group rows -->
-@if (data().length > 0) {
+<!-- If items or exposure group data provided, show expandable rows mode -->
+@if (items().length > 0 || data().length > 0) {
 <table mat-table
        [dataSource]="groupTableSource()"
        class="mat-elevation-z8"
@@ -20,33 +20,15 @@
         </td>
     </ng-container>
 
-    <!-- Group Name -->
-    <ng-container matColumnDef="ExposureGroup">
+    <!-- Summary columns (dynamic) -->
+    @for (column of (summaryColumns().length ? summaryColumns() : defaultSummaryColumns()); track column) {
+    <ng-container [matColumnDef]="columnId(column)">
         <th mat-header-cell
-            *matHeaderCellDef>Exposure Group</th>
+            *matHeaderCellDef>{{ columnHeader(column) }}</th>
         <td mat-cell
-            *matCellDef="let group">{{ group.ExposureGroup || group.Group }}</td>
+            *matCellDef="let item">{{ formatValue(valueFor(item, column, 'summary'), column) }}</td>
     </ng-container>
-
-    <!-- Samples count -->
-    <ng-container matColumnDef="Samples">
-        <th mat-header-cell
-            *matHeaderCellDef>Samples</th>
-        <td mat-cell
-            *matCellDef="let group">
-            {{ detailSource() === 'ef' ? (group.LatestExceedanceFraction?.ResultsUsed?.length ?? 0) : (group.Results?.length ?? 0) }}
-        </td>
-    </ng-container>
-
-    <!-- Latest Exceedance Fraction -->
-    <ng-container matColumnDef="LatestEF">
-        <th mat-header-cell
-            *matHeaderCellDef>Latest EF</th>
-        <td mat-cell
-            *matCellDef="let group">
-            {{ (group.LatestExceedanceFraction?.ExceedanceFraction ?? 0) | percent:'1.0-2' }}
-        </td>
-    </ng-container>
+    }
 
     <!-- Expanded detail -->
     <ng-container matColumnDef="expandedDetail">
@@ -57,20 +39,20 @@
                  [class.detail-expanded]="isExpanded(group)">
                 @if (isExpanded(group)) {
                 <table mat-table
-                       [dataSource]="detailSource() === 'ef' ? (group.LatestExceedanceFraction?.ResultsUsed ?? []) : (group.Results ?? [])"
+                       [dataSource]="detailsForItem(group)"
                        class="nested-table">
-                    @for (column of displayedColumns(); track column) {
+                    @for (column of (detailColumns().length ? detailColumns() : displayedColumns()); track column) {
                     <ng-container [matColumnDef]="columnId(column)">
                         <th mat-header-cell
                             *matHeaderCellDef>{{ columnHeader(column) }}</th>
                         <td mat-cell
-                            *matCellDef="let item">{{ item[columnId(column)] }}</td>
+                            *matCellDef="let item">{{ formatValue(valueFor(item, column, 'detail'), column) }}</td>
                     </ng-container>
                     }
                     <tr mat-header-row
-                        *matHeaderRowDef="columnIds()"></tr>
+                        *matHeaderRowDef="detailColumnIds()"></tr>
                     <tr mat-row
-                        *matRowDef="let row; columns: columnIds();"></tr>
+                        *matRowDef="let row; columns: detailColumnIds();"></tr>
                 </table>
                 }
             </div>
