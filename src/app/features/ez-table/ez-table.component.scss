@@ -1,0 +1,21 @@
+.group-row {
+    cursor: pointer;
+}
+
+.detail-row td {
+    padding: 0 !important;
+    border-bottom: none !important;
+}
+
+.detail-wrapper {
+    overflow: hidden;
+    background: #fafafa;
+}
+
+.nested-table {
+    width: 100%;
+}
+
+button.expanded mat-icon {
+    transform: rotate(180deg);
+}

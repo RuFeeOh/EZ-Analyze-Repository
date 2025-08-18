@@ -1,2 +1,2 @@
 <ez-table [displayedColumns]="defaultColumns"
-          [dataResults]="resultsData" />
+          [data]="(exposureGroups$ | async) ?? []" />

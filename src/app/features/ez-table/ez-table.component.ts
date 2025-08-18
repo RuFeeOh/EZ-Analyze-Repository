@@ -5,6 +5,8 @@ import { CommonModule } from '@angular/common';
 import { ExposureGroup } from '../../models/exposure-group.model';
 import { SampleInfo } from '../../models/sample-info.model';
 import { ExposureGroupTableItem } from '../../models/exposure-group-table-item.model';
+import { MatIconModule } from '@angular/material/icon';
+import { MatButtonModule } from '@angular/material/button';
 
 @Component({
   selector: 'ez-table',
@@ -12,6 +14,8 @@ import { ExposureGroupTableItem } from '../../models/exposure-group-table-item.m
     CommonModule,
     MatTableModule,
     MatPaginatorModule,
+    MatIconModule,
+    MatButtonModule,
   ],
   templateUrl: './ez-table.component.html',
   styleUrl: './ez-table.component.scss'
@@ -23,6 +27,7 @@ export class EzTableComponent implements AfterViewInit {
 
   @ViewChild(MatPaginator) paginator!: MatPaginator;
   paginatorSignal: WritableSignal<MatPaginator | null> = signal(null);
+  // DataSource for flat SampleInfo rows mode
   dataTableSource = computed(() => {
     let mappedData = [];
     if (this.data().length) {
@@ -36,6 +41,21 @@ export class EzTableComponent implements AfterViewInit {
     }
     return dataSource;
   });
+
+  // DataSource for group rows (expandable)
+  groupTableSource = computed(() => {
+    const groups = this.data() ?? [];
+    const dataSource = new MatTableDataSource<ExposureGroup>(groups);
+    if (this.paginatorSignal()) {
+      dataSource.paginator = this.paginatorSignal();
+    }
+    return dataSource;
+  });
+
+  // Columns for the group table (expand + summary columns)
+  readonly groupColumns: string[] = ['expand', 'ExposureGroup', 'Samples'];
+
+  expandedGroup: ExposureGroup | null = null;
 
   ngAfterViewInit() {
     this.paginatorSignal.set(this.paginator);
@@ -57,5 +77,13 @@ export class EzTableComponent implements AfterViewInit {
       Notes: result.Notes,
       SampleNumber: result.SampleNumber
     }));
+  }
+
+  isExpanded(group: ExposureGroup): boolean {
+    return this.expandedGroup === group;
+  }
+
+  toggle(group: ExposureGroup) {
+    this.expandedGroup = this.isExpanded(group) ? null : group;
   }
 }

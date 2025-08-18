@@ -1,3 +1,82 @@
+<!-- If exposure group data provided, show expandable group rows -->
+@if (data().length > 0) {
+<table mat-table
+       [dataSource]="groupTableSource()"
+       class="mat-elevation-z8"
+       multiTemplateDataRows>
+    <!-- Expand toggle column -->
+    <ng-container matColumnDef="expand">
+        <th mat-header-cell
+            *matHeaderCellDef
+            aria-label="row actions">&nbsp;</th>
+        <td mat-cell
+            *matCellDef="let group">
+            <button mat-icon-button
+                    aria-label="expand row"
+                    (click)="toggle(group); $event.stopPropagation()"
+                    [class.expanded]="isExpanded(group)">
+                <mat-icon>{{ isExpanded(group) ? 'keyboard_arrow_up' : 'keyboard_arrow_down' }}</mat-icon>
+            </button>
+        </td>
+    </ng-container>
+
+    <!-- Group Name -->
+    <ng-container matColumnDef="ExposureGroup">
+        <th mat-header-cell
+            *matHeaderCellDef>Exposure Group</th>
+        <td mat-cell
+            *matCellDef="let group">{{ group.ExposureGroup || group.Group }}</td>
+    </ng-container>
+
+    <!-- Samples count -->
+    <ng-container matColumnDef="Samples">
+        <th mat-header-cell
+            *matHeaderCellDef>Samples</th>
+        <td mat-cell
+            *matCellDef="let group">{{ group.Results?.length ?? 0 }}</td>
+    </ng-container>
+
+    <!-- Expanded detail -->
+    <ng-container matColumnDef="expandedDetail">
+        <td mat-cell
+            *matCellDef="let group"
+            [attr.colspan]="groupColumns.length">
+            <div class="detail-wrapper"
+                 [class.detail-expanded]="isExpanded(group)">
+                @if (isExpanded(group)) {
+                <table mat-table
+                       [dataSource]="group.Results"
+                       class="nested-table">
+                    @for (column of displayedColumns(); track column) {
+                    <ng-container [matColumnDef]="column">
+                        <th mat-header-cell
+                            *matHeaderCellDef>{{ column }}</th>
+                        <td mat-cell
+                            *matCellDef="let item">{{ item[column] }}</td>
+                    </ng-container>
+                    }
+                    <tr mat-header-row
+                        *matHeaderRowDef="displayedColumns()"></tr>
+                    <tr mat-row
+                        *matRowDef="let row; columns: displayedColumns();"></tr>
+                </table>
+                }
+            </div>
+        </td>
+    </ng-container>
+
+    <tr mat-header-row
+        *matHeaderRowDef="groupColumns"></tr>
+    <tr mat-row
+        *matRowDef="let row; columns: groupColumns"
+        (click)="toggle(row)"
+        class="group-row"></tr>
+    <tr mat-row
+        *matRowDef="let row; columns: ['expandedDetail']"
+        class="detail-row"></tr>
+</table>
+} @else {
+<!-- Flat results mode -->
 <table mat-table
        [dataSource]="dataTableSource()"
        class="mat-elevation-z8"
@@ -16,6 +95,7 @@
     <tr mat-row
         *matRowDef="let row; columns: displayedColumns();"></tr>
 </table>
+}
 
 <mat-paginator [pageSizeOptions]="[5, 10, 25, 50]"
                showFirstLastButtons></mat-paginator>
