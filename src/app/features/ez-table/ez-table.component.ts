@@ -7,6 +7,7 @@ import { SampleInfo } from '../../models/sample-info.model';
 import { ExposureGroupTableItem } from '../../models/exposure-group-table-item.model';
 import { MatIconModule } from '@angular/material/icon';
 import { MatButtonModule } from '@angular/material/button';
+import { EzColumn } from '../../models/ez-column.model';
 
 @Component({
   selector: 'ez-table',
@@ -21,12 +22,15 @@ import { MatButtonModule } from '@angular/material/button';
   styleUrl: './ez-table.component.scss'
 })
 export class EzTableComponent implements AfterViewInit {
-  displayedColumns = input<string[]>(['SampleDate', 'ExposureGroup', 'TWA', 'Notes', 'SampleNumber'])
+  // Accept either simple string keys or EzColumn models
+  displayedColumns = input<(string | EzColumn)[]>(['SampleDate', 'ExposureGroup', 'TWA', 'Notes', 'SampleNumber'])
   data = input<ExposureGroup[]>([]);
   dataResults = input<SampleInfo[]>([]);
 
   @ViewChild(MatPaginator) paginator!: MatPaginator;
   paginatorSignal: WritableSignal<MatPaginator | null> = signal(null);
+  // Resolve string IDs for columns to satisfy MatTable APIs
+  columnIds = computed(() => (this.displayedColumns() ?? []).map(c => typeof c === 'string' ? c : c.Name));
   // DataSource for flat SampleInfo rows mode
   dataTableSource = computed(() => {
     let mappedData = [];
@@ -53,7 +57,7 @@ export class EzTableComponent implements AfterViewInit {
   });
 
   // Columns for the group table (expand + summary columns)
-  readonly groupColumns: string[] = ['expand', 'ExposureGroup', 'Samples'];
+  readonly groupColumns: string[] = ['expand', 'ExposureGroup', 'Samples', 'LatestEF'];
 
   expandedGroup: ExposureGroup | null = null;
 
@@ -85,5 +89,14 @@ export class EzTableComponent implements AfterViewInit {
 
   toggle(group: ExposureGroup) {
     this.expandedGroup = this.isExpanded(group) ? null : group;
+  }
+
+  // Template helpers
+  columnId(col: string | EzColumn): string {
+    return typeof col === 'string' ? col : col.Name;
+  }
+
+  columnHeader(col: string | EzColumn): string {
+    return typeof col === 'string' ? col : (col.DisplayName || col.Name);
   }
 }
