@@ -1,7 +1,7 @@
 import { computed, inject, Injectable, OnInit, Signal } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { collectionData } from '@angular/fire/firestore';
-import { collection, addDoc, where, query, doc, deleteDoc } from 'firebase/firestore';
+import { collection, addDoc, where, query, doc, deleteDoc, setDoc } from 'firebase/firestore';
 import { catchError, map, Observable, of, switchMap } from 'rxjs';
 import { Firestore } from '@angular/fire/firestore'
 import { Auth, user } from '@angular/fire/auth';
@@ -64,8 +64,9 @@ export class OrganizationService {
       collection(this.firestore, "organizations"),
       this.plainObject(orgToSave)
     );
-    // Once the save is succesful, set the current organization
-    this.setCurrentOrg(orgToSave);
+    // Once the save is successful, set the current organization using the generated id
+    const orgWithUid = new Organization({ ...orgToSave, Uid: newMessageRef.id });
+    this.setCurrentOrg(orgWithUid);
     return newMessageRef;
   }
 
@@ -93,5 +94,10 @@ export class OrganizationService {
 
   private plainObject<T>(obj: T): T {
     return JSON.parse(JSON.stringify(obj));
+  }
+
+  private async persistSelectedOrgToDb(userId: string, orgId: string) {
+    const settingsRef = doc(this.firestore as any, `userSettings/${userId}`);
+    await setDoc(settingsRef as any, { currentOrgUid: orgId }, { merge: true });
   }
 }
