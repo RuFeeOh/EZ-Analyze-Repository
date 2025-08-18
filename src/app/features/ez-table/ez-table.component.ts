@@ -26,6 +26,8 @@ export class EzTableComponent implements AfterViewInit {
   displayedColumns = input<(string | EzColumn)[]>(['SampleDate', 'ExposureGroup', 'TWA', 'Notes', 'SampleNumber'])
   data = input<ExposureGroup[]>([]);
   dataResults = input<SampleInfo[]>([]);
+  // Controls where the expanded details pull from: group.Results or LatestExceedanceFraction.ResultsUsed
+  detailSource = input<'group' | 'ef'>('group');
 
   @ViewChild(MatPaginator) paginator!: MatPaginator;
   paginatorSignal: WritableSignal<MatPaginator | null> = signal(null);

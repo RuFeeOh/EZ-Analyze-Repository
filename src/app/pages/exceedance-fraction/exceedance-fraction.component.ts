@@ -24,6 +24,7 @@ export class ExceedanceFractionComponent {
   private orgService = inject(OrganizationService);
   exposureGroups$!: Observable<any[]>;
   resultsData: SampleInfo[] = [];
+  // Columns shown for detail rows of EF (inputs used)
   defaultColumns: string[] = ['SampleDate', 'ExposureGroup', 'TWA', 'Notes', 'SampleNumber'];
 
   constructor() {
@@ -33,10 +34,7 @@ export class ExceedanceFractionComponent {
     const q = orgId ? query(ref, where('OrganizationUid', '==', orgId)) : ref;
     this.exposureGroups$ = collectionData(q as any, { idField: 'Uid' }).pipe(map(d => d as any[]));
 
-    // Subscribe to map exposure groups into flat results for the table
-    this.exposureGroups$.subscribe(items => {
-      this.resultsData = items.map(it => it?.Results || []).flat();
-    });
+    // For EF view, we don't need to flatten; ez-table uses groups and EF ResultsUsed for details.
   }
 
 }

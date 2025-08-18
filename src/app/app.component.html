@@ -1,14 +1,28 @@
 <mat-drawer-container class="example-container">
-    <mat-drawer mode="side" opened>
+    <mat-drawer mode="side"
+                opened>
 
         <mat-nav-list>
             currentOrg: {{organizationService.currentOrg?.Name}}
             <app-login></app-login>
-            <a mat-list-item routerLink="/home" routerLinkActive="mdc-list-item--activated">Home</a>
-            <a mat-list-item routerLink="/org" routerLinkActive="mdc-list-item--activated">Org</a>
-            <a mat-list-item routerLink="/data" routerLinkActive="mdc-list-item--activated">Data</a>
-            <a mat-list-item routerLink="/exceedance-fraction" routerLinkActive="mdc-list-item--activated">
+            <a mat-list-item
+               routerLink="/home"
+               routerLinkActive="mdc-list-item--activated">Home</a>
+            <a mat-list-item
+               routerLink="/org"
+               routerLinkActive="mdc-list-item--activated">Org</a>
+            <a mat-list-item
+               routerLink="/data"
+               routerLinkActive="mdc-list-item--activated">Data</a>
+            <a mat-list-item
+               routerLink="/exceedance-fraction"
+               routerLinkActive="mdc-list-item--activated">
                 Exceedance Fractions
+            </a>
+            <a mat-list-item
+               routerLink="/exposure-groups"
+               routerLinkActive="mdc-list-item--activated">
+                Exposure Groups
             </a>
         </mat-nav-list>
     </mat-drawer>

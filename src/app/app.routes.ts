@@ -3,6 +3,7 @@ import { HomeComponent } from './pages/home/home.component';
 import { DataComponent } from './pages/data/data.component';
 import { OrganizationSelectorComponent } from './pages/organization-selector/organization-selector.component';
 import { ExceedanceFractionComponent } from './pages/exceedance-fraction/exceedance-fraction.component';
+import { ExposureGroupsComponent } from './pages/exposure-groups/exposure-groups.component';
 
 export const routes: Routes = [
     {
@@ -24,5 +25,11 @@ export const routes: Routes = [
         path: 'exceedance-fraction',
         title: 'Exceedance Fraction',
         component: ExceedanceFractionComponent,
+    }
+    ,
+    {
+        path: 'exposure-groups',
+        title: 'Exposure Groups',
+        component: ExposureGroupsComponent,
     }
 ];

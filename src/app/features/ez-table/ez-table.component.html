@@ -33,7 +33,9 @@
         <th mat-header-cell
             *matHeaderCellDef>Samples</th>
         <td mat-cell
-            *matCellDef="let group">{{ group.Results?.length ?? 0 }}</td>
+            *matCellDef="let group">
+            {{ detailSource() === 'ef' ? (group.LatestExceedanceFraction?.ResultsUsed?.length ?? 0) : (group.Results?.length ?? 0) }}
+        </td>
     </ng-container>
 
     <!-- Latest Exceedance Fraction -->
@@ -55,7 +57,7 @@
                  [class.detail-expanded]="isExpanded(group)">
                 @if (isExpanded(group)) {
                 <table mat-table
-                       [dataSource]="group.Results"
+                       [dataSource]="detailSource() === 'ef' ? (group.LatestExceedanceFraction?.ResultsUsed ?? []) : (group.Results ?? [])"
                        class="nested-table">
                     @for (column of displayedColumns(); track column) {
                     <ng-container [matColumnDef]="columnId(column)">
