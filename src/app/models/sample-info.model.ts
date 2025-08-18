@@ -5,4 +5,5 @@ export class SampleInfo {
     ExposureGroup: string = "";
     Agent: string = "";
     TWA: number = 0;
+    Notes: string = "";
 }

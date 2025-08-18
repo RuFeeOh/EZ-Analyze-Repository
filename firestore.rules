@@ -36,8 +36,8 @@ service cloud.firestore {
     }
     match /exposureGroups/{exposureGroup} {
       allow read, write, delete: if resource.data != null
-                 && resource.data.organizationUid != null
-                 && isUserInOrganization(get(/databases/$(database)/documents/organizations/$(resource.data.OrganizationUid)))
+                 && resource.data.OrganizationUid != null
+                 && isUserInOrganization(get(/databases/$(database)/documents/organizations/$(resource.data.OrganizationUid)));
       allow create: if isLoggedIn();
     }
     match /breakdownTask/{task} {
