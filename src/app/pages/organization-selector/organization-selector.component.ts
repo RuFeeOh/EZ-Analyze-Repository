@@ -42,4 +42,14 @@ export class OrganizationSelectorComponent {
     this.organizationService.setCurrentOrg(org);
   }
 
+  async confirmDelete(org: Organization) {
+    const ok = confirm(`Delete organization "${org.Name}"? This cannot be undone.`);
+    if (!ok) return;
+    try {
+      await this.organizationService.deleteOrganization(org.Uid);
+    } catch (e) {
+      console.error('Failed to delete org', e);
+    }
+  }
+
 }

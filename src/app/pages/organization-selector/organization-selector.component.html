@@ -1,20 +1,26 @@
 <p>Select Your Organization</p>
-@for (org of organizationList(); track org.Name) {
+@for (org of organizationList(); track org.Uid) {
 <button mat-flat-button
-        (click)="setOrganization(org)"
-        class="orgButton">{{org.Name}}</button>
+        class="orgButton"
+        (click)="setOrganization(org)">
+        <span class="orgName">{{ org.Name }}</span>
+        <span class="deleteX"
+              aria-label="Delete"
+              title="Delete"
+              (click)="$event.stopPropagation(); confirmDelete(org)">×</span>
+</button>
 }
 
 <form class="Add new org">
-    <p>My organization isn't listed</p>
-    <mat-form-field class="example-full-width">
-        <mat-label>Enter Org</mat-label>
-        <input matInput
-               placeholder="Name"
-               [(ngModel)]="organizationName"
-               name="newOrg">
-    </mat-form-field>
-    <button mat-flat-button
-            (click)="saveOrganization()"
-            class="orgButton">SAVE</button>
+        <p>My organization isn't listed</p>
+        <mat-form-field class="example-full-width">
+                <mat-label>Enter Org</mat-label>
+                <input matInput
+                       placeholder="Name"
+                       [(ngModel)]="organizationName"
+                       name="newOrg">
+        </mat-form-field>
+        <button mat-flat-button
+                (click)="saveOrganization()"
+                class="orgButton">SAVE</button>
 </form>

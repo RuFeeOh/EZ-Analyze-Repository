@@ -1,7 +1,7 @@
 import { computed, inject, Injectable, OnInit, Signal } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { collectionData } from '@angular/fire/firestore';
-import { collection, addDoc, where, query } from 'firebase/firestore';
+import { collection, addDoc, where, query, doc, deleteDoc } from 'firebase/firestore';
 import { catchError, map, Observable, of, switchMap } from 'rxjs';
 import { Firestore } from '@angular/fire/firestore'
 import { Auth, user } from '@angular/fire/auth';
@@ -67,6 +67,16 @@ export class OrganizationService {
     // Once the save is succesful, set the current organization
     this.setCurrentOrg(orgToSave);
     return newMessageRef;
+  }
+
+  public async deleteOrganization(orgId: string) {
+    if (!orgId) throw new Error('Organization id is required');
+    const orgRef = doc(this.firestore as any, `organizations/${orgId}`);
+    await deleteDoc(orgRef as any);
+    if (this.currentOrg?.Uid === orgId) {
+      this.currentOrg = null;
+      localStorage.removeItem('currentOrg');
+    }
   }
 
 
