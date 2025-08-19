@@ -18,10 +18,6 @@ export class ExposureGroupService {
 
   async saveSampleInfo(sampleInfo: SampleInfo[], organizationUid: string, organizationName: string) {
     try {
-      const TWAlist: number[] = this.getTWAListFromSampleInfo(sampleInfo);
-      const exceedanceFraction = this.exceedanceFractionservice.calculateExceedanceProbability(TWAlist, 0.05);
-
-      const latestExceedanceFraction = this.createExceedanceFraction(exceedanceFraction, TWAlist, sampleInfo);
       // Deterministic document ID to avoid duplicates: orgUid + slug(group)
       const groupName = sampleInfo[0]?.ExposureGroup || 'unknown-group';
       const docId = `${organizationUid}__${this.slugify(groupName)}`;
@@ -31,6 +27,19 @@ export class ExposureGroupService {
       // Upsert using a transaction to atomically append history and concatenate results
       await runTransaction(this.firestore, async (tx) => {
         const snap = await tx.get(docRef as any);
+        const existingData: any = snap.exists() ? (snap.data() || {}) : {};
+        const existingResults: SampleInfo[] = (existingData?.Results ?? []) as SampleInfo[];
+
+        // Merge results first, then recompute EF from the six most recent samples
+        const updatedResults: SampleInfo[] = [...existingResults, ...sampleInfo];
+
+        const mostRecentSix: SampleInfo[] = this.getMostRecentSamples(updatedResults, 6);
+        const TWAlist: number[] = this.getTWAListFromSampleInfo(mostRecentSix);
+        const efValue: number = TWAlist.length >= 2
+          ? this.exceedanceFractionservice.calculateExceedanceProbability(TWAlist, 0.05)
+          : 0;
+        const latestExceedanceFraction: ExceedanceFraction = this.createExceedanceFraction(efValue, TWAlist, mostRecentSix);
+
         if (!snap.exists()) {
           // Create new document
           const exposureGroup = new ExposureGroup({
@@ -38,17 +47,14 @@ export class ExposureGroupService {
             OrganizationName: organizationName,
             Group: groupName,
             ExposureGroup: groupName,
-            Results: sampleInfo,
+            Results: updatedResults,
             LatestExceedanceFraction: latestExceedanceFraction,
             ExceedanceFractionHistory: [latestExceedanceFraction]
           });
           tx.set(docRef as any, JSON.parse(JSON.stringify(exposureGroup)));
         } else {
           // Update existing: append to history and concat results
-          const data: any = snap.data() || {};
-          const existingResults: SampleInfo[] = (data?.Results ?? []) as SampleInfo[];
-          const existingHistory: any[] = (data?.ExceedanceFractionHistory ?? []) as any[];
-          const updatedResults = [...existingResults, ...sampleInfo];
+          const existingHistory: any[] = (existingData?.ExceedanceFractionHistory ?? []) as any[];
           const updatedHistory = [...existingHistory, latestExceedanceFraction];
 
           tx.update(docRef as any, {
@@ -145,4 +151,23 @@ export class ExposureGroupService {
       .slice(0, 120);
   }
 
+  /**
+   * Select up to `max` most recent samples by SampleDate (descending).
+   * Only includes samples with TWA > 0.
+   */
+  private getMostRecentSamples(results: SampleInfo[], max: number = 6): SampleInfo[] {
+    const candidates = (results || []).filter(r => r && Number(r.TWA) > 0);
+    const sorted = [...candidates].sort((a, b) => this.parseDateToEpoch(b.SampleDate) - this.parseDateToEpoch(a.SampleDate));
+    return sorted.slice(0, Math.min(max, sorted.length));
+  }
+
+  /**
+   * Parses a date string into an epoch milliseconds number. If invalid, returns 0.
+   */
+  private parseDateToEpoch(dateStr: string | undefined | null): number {
+    if (!dateStr) return 0;
+    const d = new Date(dateStr);
+    const t = d.getTime();
+    return isNaN(t) ? 0 : t;
+  }
 }
