@@ -8,6 +8,7 @@ import { ExposureGroupTableItem } from '../../models/exposure-group-table-item.m
 import { MatIconModule } from '@angular/material/icon';
 import { MatButtonModule } from '@angular/material/button';
 import { EzColumn } from '../../models/ez-column.model';
+import { EzFormatPipe } from '../../pipes/ez-format.pipe';
 
 @Component({
   selector: 'ez-table',
@@ -17,6 +18,7 @@ import { EzColumn } from '../../models/ez-column.model';
     MatPaginatorModule,
     MatIconModule,
     MatButtonModule,
+    EzFormatPipe,
   ],
   templateUrl: './ez-table.component.html',
   styleUrl: './ez-table.component.scss'
@@ -145,36 +147,7 @@ export class EzTableComponent implements AfterViewInit {
     return item?.[key];
   }
 
-  formatValue(value: any, col: string | EzColumn): string {
-    const fmt = typeof col === 'string' ? undefined : col.Format;
-    const key = this.columnId(col);
-    const formatDateDDMMMYYYY = (v: any): string => {
-      if (!v) return '';
-      const d = new Date(v);
-      if (isNaN(d.getTime())) return '';
-      const dd = String(d.getDate()).padStart(2, '0');
-      const mmm = d.toLocaleString(undefined, { month: 'short' });
-      const yyyy = d.getFullYear();
-      return `${dd}-${mmm}-${yyyy}`;
-    };
-
-    // Auto-format well-known date keys
-    if (key === 'SampleDate' || key === 'ExceedanceFractionDate') {
-      return formatDateDDMMMYYYY(value);
-    }
-    if (fmt === 'percent') {
-      const num = typeof value === 'number' ? value : Number(value ?? 0);
-      return new Intl.NumberFormat(undefined, { style: 'percent', minimumFractionDigits: 1, maximumFractionDigits: 2 }).format(num);
-    }
-    if (fmt === 'number') {
-      const num = typeof value === 'number' ? value : Number(value ?? 0);
-      return new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(num);
-    }
-    if (fmt === 'date') {
-      return formatDateDDMMMYYYY(value);
-    }
-    return value ?? '';
-  }
+  // Formatting is handled by ezFormat pipe in the template.
 
   detailsForItem(item: any): any[] {
     const accessor = this.detailFor();
