@@ -1,7 +1,7 @@
-import { AfterViewInit, Component, computed, input, signal, ViewChild, WritableSignal } from '@angular/core';
+import { AfterViewInit, Component, computed, input, signal, ViewChild, WritableSignal, inject } from '@angular/core';
 import { MatPaginator, MatPaginatorModule } from '@angular/material/paginator';
 import { MatTableDataSource, MatTableModule } from '@angular/material/table';
-import { MatSort, MatSortModule } from '@angular/material/sort';
+import { MatSort, MatSortModule, Sort } from '@angular/material/sort';
 import { CommonModule } from '@angular/common';
 import { ExposureGroup } from '../../models/exposure-group.model';
 import { SampleInfo } from '../../models/sample-info.model';
@@ -10,6 +10,7 @@ import { MatIconModule } from '@angular/material/icon';
 import { MatButtonModule } from '@angular/material/button';
 import { EzColumn } from '../../models/ez-column.model';
 import { EzFormatPipe } from '../../pipes/ez-format.pipe';
+import { LiveAnnouncer } from '@angular/cdk/a11y';
 
 @Component({
   selector: 'ez-table',
@@ -26,6 +27,7 @@ import { EzFormatPipe } from '../../pipes/ez-format.pipe';
   styleUrl: './ez-table.component.scss'
 })
 export class EzTableComponent implements AfterViewInit {
+  private liveAnnouncer = inject(LiveAnnouncer);
   // Generic configuration
   // - summaryColumns: rendered for the top-level rows (items)
   // - detailColumns: rendered for the expanded detail rows (detail items)
@@ -39,6 +41,9 @@ export class EzTableComponent implements AfterViewInit {
   // Filtering support (by default, filters by ExposureGroup)
   filterText = input<string>('');
   filterKey = input<string>('ExposureGroup');
+  // Default sort support
+  defaultSortActive = input<string | null>(null);
+  defaultSortDirection = input<'asc' | 'desc'>('asc');
 
   // Deprecated/back-compat inputs (will be removed when callers migrate)
   displayedColumns = input<(string | EzColumn)[]>(['SampleDate', 'ExposureGroup', 'TWA', 'Notes', 'SampleNumber']);
@@ -46,31 +51,59 @@ export class EzTableComponent implements AfterViewInit {
   dataResults = input<SampleInfo[]>([]);
   detailSource = input<'group' | 'ef'>('group');
 
-  @ViewChild(MatPaginator) paginator!: MatPaginator;
-  @ViewChild(MatSort) sort!: MatSort;
+  private defaultSortApplied = false;
   paginatorSignal: WritableSignal<MatPaginator | null> = signal(null);
   sortSignal: WritableSignal<MatSort | null> = signal(null);
+
+  // Use setters so we catch when the view branch with matSort/matPaginator appears later
+  @ViewChild(MatPaginator)
+  set paginator(p: MatPaginator) {
+    if (p) {
+      this.paginatorSignal.set(p);
+      // Keep data sources wired up
+      this.groupDataSource.paginator = p;
+      this.flatDataSource.paginator = p;
+    }
+  }
+
+  @ViewChild(MatSort)
+  set sort(s: MatSort) {
+    if (s) {
+      this.sortSignal.set(s);
+      // Wire sort to data sources immediately
+      this.groupDataSource.sort = s;
+      this.flatDataSource.sort = s;
+      this.groupDataSource.sortingDataAccessor = (item: any, property: string): any => this.sortAccessor(item, property);
+      this.flatDataSource.sortingDataAccessor = (item: any, property: string): any => this.sortAccessor(item, property);
+      // Apply default sort once when sort is first available
+      this.applyDefaultSortIfNeeded();
+    }
+  }
+
+  // Persistent data sources to keep MatSort bindings stable
+  private groupDataSource = new MatTableDataSource<any>([]);
+  private flatDataSource = new MatTableDataSource<ExposureGroupTableItem>([]);
   // Resolve string IDs for columns to satisfy MatTable APIs
   columnIds = computed(() => (this.displayedColumns() ?? []).map(c => typeof c === 'string' ? c : c.Name));
   summaryColumnIds = computed(() => (this.summaryColumns()?.length ? this.summaryColumns() : this.defaultSummaryColumns()).map(c => typeof c === 'string' ? c : c.Name));
   detailColumnIds = computed(() => (this.detailColumns()?.length ? this.detailColumns() : this.displayedColumns()).map(c => typeof c === 'string' ? c : c.Name));
   // DataSource for flat SampleInfo rows mode
   dataTableSource = computed(() => {
-    let mappedData = [];
+    let mappedData: ExposureGroupTableItem[] = [];
     if (this.data().length) {
       mappedData = this.mapExposureGroupsToTableItems(this.data());
     } else {
       mappedData = this.mapResultsToTableItems(this.dataResults() ?? []);
     }
-    const dataSource = new MatTableDataSource<ExposureGroupTableItem>(mappedData);
+    this.flatDataSource.data = mappedData;
     if (this.paginatorSignal()) {
-      dataSource.paginator = this.paginatorSignal();
+      this.flatDataSource.paginator = this.paginatorSignal();
     }
     if (this.sortSignal()) {
-      dataSource.sort = this.sortSignal()!;
-      dataSource.sortingDataAccessor = (item: any, property: string): any => this.sortAccessor(item, property);
+      this.flatDataSource.sort = this.sort;
+      this.flatDataSource.sortingDataAccessor = (item: any, property: string): any => this.sortAccessor(item, property);
     }
-    return dataSource;
+    return this.flatDataSource;
   });
 
   // DataSource for generic items (expandable)
@@ -79,24 +112,24 @@ export class EzTableComponent implements AfterViewInit {
     const filter = (this.filterText() || '').trim().toLowerCase();
     const filterKey = this.filterKey();
     const groups = (this.items()?.length ? this.items() : (this.data() ?? []));
-    const dataSource = new MatTableDataSource<any>(groups);
+    this.groupDataSource.data = groups;
     if (this.paginatorSignal()) {
-      dataSource.paginator = this.paginatorSignal();
+      this.groupDataSource.paginator = this.paginatorSignal();
     }
     if (this.sortSignal()) {
-      dataSource.sort = this.sortSignal()!;
-      dataSource.sortingDataAccessor = (item: any, property: string): any => this.sortAccessor(item, property);
+      this.groupDataSource.sort = this.sortSignal()!;
+      this.groupDataSource.sortingDataAccessor = (item: any, property: string): any => this.sortAccessor(item, property);
     }
     // Filter by exposure group (or configured key)
-    dataSource.filterPredicate = (item: any, filt: string): boolean => {
+    this.groupDataSource.filterPredicate = (item: any, filt: string): boolean => {
       if (!filt) return true;
       const val = (filterKey === 'ExposureGroup')
         ? (item?.ExposureGroup ?? item?.Group ?? '')
         : (item?.[filterKey] ?? '');
       return String(val).toLowerCase().includes(filt);
     };
-    dataSource.filter = filter;
-    return dataSource;
+    this.groupDataSource.filter = filter;
+    return this.groupDataSource;
   });
 
   // Columns for the group table (expand + configured summary columns)
@@ -104,11 +137,42 @@ export class EzTableComponent implements AfterViewInit {
     return ['expand', ...this.summaryColumnIds()];
   }
 
+  // Optional: announce sort changes for accessibility
+  announceSortChange(sortState: Sort) {
+    if (sortState.direction) {
+      this.liveAnnouncer.announce(`Sorted by ${sortState.active} ${sortState.direction}`);
+    } else {
+      this.liveAnnouncer.announce('Sorting cleared');
+    }
+  }
+
   expandedGroup: any | null = null;
 
   ngAfterViewInit() {
-    this.paginatorSignal.set(this.paginator);
-    this.sortSignal.set(this.sort);
+    // Nothing needed here; we attach sort/paginator in the @ViewChild setters because
+    // the table may render conditionally after init.
+  }
+
+  private applyDefaultSortIfNeeded() {
+    if (this.defaultSortApplied) return;
+    const s = this.sortSignal();
+    const active = this.defaultSortActive();
+    if (!s || !active) return;
+    this.defaultSortApplied = true;
+    setTimeout(() => {
+      try {
+        const sortable = (s as any).sortables?.get(active);
+        if (sortable && typeof s.sort === 'function') {
+          s.sort(sortable);
+          s.direction = this.defaultSortDirection();
+          s.sortChange.emit({ active: s.active, direction: s.direction });
+        } else {
+          (s as any).active = active;
+          (s as any).direction = this.defaultSortDirection();
+          s.sortChange.emit({ active: active, direction: this.defaultSortDirection() });
+        }
+      } catch { }
+    });
   }
 
   private mapExposureGroupsToTableItems(exposureGroups: ExposureGroup[]): ExposureGroupTableItem[] {

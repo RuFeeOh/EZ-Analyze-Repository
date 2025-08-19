@@ -2,6 +2,10 @@
 @if (items().length > 0 || data().length > 0) {
 <table mat-table
        matSort
+       [matSortActive]="defaultSortActive() || ''"
+       [matSortDirection]="defaultSortDirection()"
+       [matSortDisableClear]="true"
+       (matSortChange)="announceSortChange($event)"
        [dataSource]="groupTableSource()"
        class="mat-elevation-z8"
        multiTemplateDataRows>
@@ -26,7 +30,7 @@
     <ng-container [matColumnDef]="columnId(column)">
         <th mat-header-cell
             *matHeaderCellDef
-            mat-sort-header>{{ columnHeader(column) }}</th>
+            [mat-sort-header]="columnId(column)">{{ columnHeader(column) }}</th>
         <td mat-cell
             *matCellDef="let item">{{ valueFor(item, column, 'summary') | ezFormat: column }}</td>
     </ng-container>
