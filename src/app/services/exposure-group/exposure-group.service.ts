@@ -77,6 +77,65 @@ export class ExposureGroupService {
     }
   }
 
+  /**
+   * Save multiple exposure groups in a single transaction. The input is a map of groupName -> SampleInfo[]
+   * For each group, merges Results, recomputes EF from last 6 samples, updates Latest/History, and upserts the doc.
+   * Returns an array of { id: string, groupName: string } for saved docs.
+   */
+  async saveGroupedSampleInfo(groups: { [groupName: string]: SampleInfo[] }, organizationUid: string, organizationName: string) {
+    const colRef = collection(this.firestore, 'exposureGroups');
+    const entries = Object.entries(groups || {}).filter(([_, arr]) => (arr?.length ?? 0) > 0);
+    if (entries.length === 0) return [];
+
+    const result = await runTransaction(this.firestore, async (tx) => {
+      const saved: { id: string, groupName: string }[] = [];
+      for (const [groupNameRaw, samples] of entries) {
+        const groupName = groupNameRaw || samples[0]?.ExposureGroup || 'unknown-group';
+        const docId = `${organizationUid}__${this.slugify(groupName)}`;
+        const docRef = doc(colRef, docId);
+        const snap = await tx.get(docRef as any);
+        const existingData: any = snap.exists() ? (snap.data() || {}) : {};
+        const existingResults: SampleInfo[] = (existingData?.Results ?? []) as SampleInfo[];
+
+        const updatedResults: SampleInfo[] = [...existingResults, ...samples];
+        const mostRecentSix: SampleInfo[] = this.getMostRecentSamples(updatedResults, 6);
+        const TWAlist: number[] = this.getTWAListFromSampleInfo(mostRecentSix);
+        const efValue: number = TWAlist.length >= 2
+          ? this.exceedanceFractionservice.calculateExceedanceProbability(TWAlist, 0.05)
+          : 0;
+        const latestExceedanceFraction: ExceedanceFraction = this.createExceedanceFraction(efValue, TWAlist, mostRecentSix);
+
+        if (!snap.exists()) {
+          const exposureGroup = new ExposureGroup({
+            OrganizationUid: organizationUid,
+            OrganizationName: organizationName,
+            Group: groupName,
+            ExposureGroup: groupName,
+            Results: updatedResults,
+            LatestExceedanceFraction: latestExceedanceFraction,
+            ExceedanceFractionHistory: [latestExceedanceFraction]
+          });
+          tx.set(docRef as any, JSON.parse(JSON.stringify(exposureGroup)));
+        } else {
+          const existingHistory: any[] = (existingData?.ExceedanceFractionHistory ?? []) as any[];
+          const updatedHistory = [...existingHistory, latestExceedanceFraction];
+          tx.update(docRef as any, {
+            Results: JSON.parse(JSON.stringify(updatedResults)),
+            LatestExceedanceFraction: JSON.parse(JSON.stringify(latestExceedanceFraction)),
+            ExceedanceFractionHistory: JSON.parse(JSON.stringify(updatedHistory)),
+            OrganizationUid: organizationUid,
+            OrganizationName: organizationName,
+            Group: groupName,
+            ExposureGroup: groupName,
+          });
+        }
+        saved.push({ id: docId, groupName });
+      }
+      return saved;
+    });
+    return result;
+  }
+
 
   /**
      * Separates an array of SampleInfo objects into groups based on their ExposureGroup.

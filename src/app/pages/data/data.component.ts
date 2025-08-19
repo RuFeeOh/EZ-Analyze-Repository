@@ -119,12 +119,14 @@ export class DataComponent {
     this.exceedanceFraction = this.exceedanceFractionservice.calculateExceedanceProbability(TWAlist, 0.05);
   }
 
-  saveSampleInfo() {
+  async saveSampleInfo() {
     const currentOrg = this.organizationservice.currentOrg;
     if (!currentOrg) { throw new Error("No current organization") }
     // Only save valid rows
     const validRows = (this.excelData || []).filter(r => !r.__invalid) as SampleInfo[];
-    this.exposureGroupservice.saveSampleInfo(validRows, currentOrg.Uid, currentOrg.Name);
+    // Separate into exposure groups and save each group concurrently
+    const grouped = this.exposureGroupservice.separateSampleInfoByExposureGroup(validRows);
+    await this.exposureGroupservice.saveGroupedSampleInfo(grouped, currentOrg.Uid, currentOrg.Name);
   }
 
   // Helpers
