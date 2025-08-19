@@ -89,15 +89,21 @@ export class ExposureGroupService {
 
     const result = await runTransaction(this.firestore, async (tx) => {
       const saved: { id: string, groupName: string }[] = [];
-      for (const [groupNameRaw, samples] of entries) {
+
+      // Pass 1: Read all docs first
+      const docs = await Promise.all(entries.map(async ([groupNameRaw, samples]) => {
         const groupName = groupNameRaw || samples[0]?.ExposureGroup || 'unknown-group';
         const docId = `${organizationUid}__${this.slugify(groupName)}`;
-        const docRef = doc(colRef, docId);
-        const snap = await tx.get(docRef as any);
+        const docRefInst = doc(colRef, docId);
+        const snap = await tx.get(docRefInst as any);
         const existingData: any = snap.exists() ? (snap.data() || {}) : {};
-        const existingResults: SampleInfo[] = (existingData?.Results ?? []) as SampleInfo[];
+        return { groupName, docId, docRefInst, snap, existingData, samples };
+      }));
 
-        const updatedResults: SampleInfo[] = [...existingResults, ...samples];
+      // Pass 2: Compute updates and write
+      for (const d of docs) {
+        const existingResults: SampleInfo[] = (d.existingData?.Results ?? []) as SampleInfo[];
+        const updatedResults: SampleInfo[] = [...existingResults, ...d.samples];
         const mostRecentSix: SampleInfo[] = this.getMostRecentSamples(updatedResults, 6);
         const TWAlist: number[] = this.getTWAListFromSampleInfo(mostRecentSix);
         const efValue: number = TWAlist.length >= 2
@@ -105,31 +111,31 @@ export class ExposureGroupService {
           : 0;
         const latestExceedanceFraction: ExceedanceFraction = this.createExceedanceFraction(efValue, TWAlist, mostRecentSix);
 
-        if (!snap.exists()) {
+        if (!d.snap.exists()) {
           const exposureGroup = new ExposureGroup({
             OrganizationUid: organizationUid,
             OrganizationName: organizationName,
-            Group: groupName,
-            ExposureGroup: groupName,
+            Group: d.groupName,
+            ExposureGroup: d.groupName,
             Results: updatedResults,
             LatestExceedanceFraction: latestExceedanceFraction,
             ExceedanceFractionHistory: [latestExceedanceFraction]
           });
-          tx.set(docRef as any, JSON.parse(JSON.stringify(exposureGroup)));
+          tx.set(d.docRefInst as any, JSON.parse(JSON.stringify(exposureGroup)));
         } else {
-          const existingHistory: any[] = (existingData?.ExceedanceFractionHistory ?? []) as any[];
+          const existingHistory: any[] = (d.existingData?.ExceedanceFractionHistory ?? []) as any[];
           const updatedHistory = [...existingHistory, latestExceedanceFraction];
-          tx.update(docRef as any, {
+          tx.update(d.docRefInst as any, {
             Results: JSON.parse(JSON.stringify(updatedResults)),
             LatestExceedanceFraction: JSON.parse(JSON.stringify(latestExceedanceFraction)),
             ExceedanceFractionHistory: JSON.parse(JSON.stringify(updatedHistory)),
             OrganizationUid: organizationUid,
             OrganizationName: organizationName,
-            Group: groupName,
-            ExposureGroup: groupName,
+            Group: d.groupName,
+            ExposureGroup: d.groupName,
           });
         }
-        saved.push({ id: docId, groupName });
+        saved.push({ id: d.docId, groupName: d.groupName });
       }
       return saved;
     });
