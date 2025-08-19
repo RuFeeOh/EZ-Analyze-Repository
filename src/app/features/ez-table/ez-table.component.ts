@@ -44,6 +44,9 @@ export class EzTableComponent implements AfterViewInit {
   // Default sort support
   defaultSortActive = input<string | null>(null);
   defaultSortDirection = input<'asc' | 'desc'>('asc');
+  // Paginator config
+  pageSize = input<number>(5);
+  pageSizeOptions = input<number[]>([5, 10, 25, 50]);
 
   // Deprecated/back-compat inputs (will be removed when callers migrate)
   displayedColumns = input<(string | EzColumn)[]>(['SampleDate', 'ExposureGroup', 'TWA', 'Notes', 'SampleNumber']);
@@ -61,8 +64,9 @@ export class EzTableComponent implements AfterViewInit {
     if (p) {
       this.paginatorSignal.set(p);
       // Keep data sources wired up
-      this.groupDataSource.paginator = p;
-      this.flatDataSource.paginator = p;
+      p.pageSize = this.pageSize();
+      // Do not attach to both data sources here; we'll attach only the active one
+      // inside the computed dataSource getters to avoid dual subscriptions.
     }
   }
 
@@ -70,11 +74,8 @@ export class EzTableComponent implements AfterViewInit {
   set sort(s: MatSort) {
     if (s) {
       this.sortSignal.set(s);
-      // Wire sort to data sources immediately
-      this.groupDataSource.sort = s;
-      this.flatDataSource.sort = s;
-      this.groupDataSource.sortingDataAccessor = (item: any, property: string): any => this.sortAccessor(item, property);
-      this.flatDataSource.sortingDataAccessor = (item: any, property: string): any => this.sortAccessor(item, property);
+      // Do not wire both data sources here; attach only the active one
+      // inside the computed getters to prevent conflicting subscriptions.
       // Apply default sort once when sort is first available
       this.applyDefaultSortIfNeeded();
     }
@@ -96,13 +97,19 @@ export class EzTableComponent implements AfterViewInit {
       mappedData = this.mapResultsToTableItems(this.dataResults() ?? []);
     }
     this.flatDataSource.data = mappedData;
+    // Attach paginator only to the flat data source when flat table is active
     if (this.paginatorSignal()) {
       this.flatDataSource.paginator = this.paginatorSignal();
     }
+    // Detach paginator from the group data source to avoid dual subscriptions
+    this.groupDataSource.paginator = null as any;
+    // Flat table does not use MatSort in the template, but keep accessor consistent if needed
     if (this.sortSignal()) {
-      this.flatDataSource.sort = this.sort;
+      this.flatDataSource.sort = this.sortSignal()!;
       this.flatDataSource.sortingDataAccessor = (item: any, property: string): any => this.sortAccessor(item, property);
     }
+    // Ensure group data source is not bound to sort when flat table is active
+    this.groupDataSource.sort = null as any;
     return this.flatDataSource;
   });
 
@@ -113,13 +120,18 @@ export class EzTableComponent implements AfterViewInit {
     const filterKey = this.filterKey();
     const groups = (this.items()?.length ? this.items() : (this.data() ?? []));
     this.groupDataSource.data = groups;
+    // Attach paginator only to the group data source when group table is active
     if (this.paginatorSignal()) {
       this.groupDataSource.paginator = this.paginatorSignal();
     }
+    // Detach paginator from the flat data source to avoid dual subscriptions
+    this.flatDataSource.paginator = null as any;
     if (this.sortSignal()) {
       this.groupDataSource.sort = this.sortSignal()!;
       this.groupDataSource.sortingDataAccessor = (item: any, property: string): any => this.sortAccessor(item, property);
     }
+    // Ensure flat data source is not bound to sort when group table is active
+    this.flatDataSource.sort = null as any;
     // Filter by exposure group (or configured key)
     this.groupDataSource.filterPredicate = (item: any, filt: string): boolean => {
       if (!filt) return true;
@@ -129,6 +141,10 @@ export class EzTableComponent implements AfterViewInit {
       return String(val).toLowerCase().includes(filt);
     };
     this.groupDataSource.filter = filter;
+    // Ensure paginator resets on filter changes so page displays results
+    if (this.groupDataSource.paginator) {
+      try { this.groupDataSource.paginator.firstPage(); } catch { }
+    }
     return this.groupDataSource;
   });
 
