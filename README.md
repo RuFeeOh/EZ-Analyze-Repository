@@ -2,6 +2,24 @@
 
 This project was generated using [Angular CLI](https://github.com/angular/angular-cli) version 19.1.7.
 
+## App Description
+
+This apps goal is to help expedite the analysis of exceedance probabilities (hereafter known as exceedance franction or EF). The app will allow upload of excel documents for exposureGroups which will have a sampleDate and Time Weighted Average (TWA) and every upload will create a new ExceedanceFraction and store the which samples were part of the EF. The goal is to create a running history for exposureGroups for easy anaylsis of how an exposureGroup has performed over time.
+
+## Exceedance Fraction Calculation
+
+Exceedance fractions are calculated by sorting all the sample data by date and taking the 6 (six) most recent samples and running the exceedance fraction formula on those 6.
+
+## Pages
+
+### Data
+
+The data page is currently used for uploading of the excel spreadsheets. There is a table which allows the user to verify its the correct data before clicking the save button
+
+### Exceedance Fraction
+
+The exceedance fraction page will show all the exceedance fractions for all the exposureGroups. There will be a grid showing the exposureGroup, ExceedanceFraction, Calculation Date, and how many samples were used for the calculation. The grid will be sorted so the most recent calculated exceedance fractions are at the top. Each row will be able to expand to show the samples that were used. Above the grid will be a toggle to "Show Latest" which will filter the grid to show only the latest exceedance fraction per exposureGroup; this toggle will be on by default.
+
 ## Development server
 
 To start a local development server, run:
