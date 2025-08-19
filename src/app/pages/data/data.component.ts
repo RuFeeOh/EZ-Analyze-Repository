@@ -8,6 +8,7 @@ import { MatTableModule } from '@angular/material/table';
 import { ExceedanceFractionService } from '../../services/exceedance-fraction/exceedance-fraction.service';
 import { ExposureGroupService } from '../../services/exposure-group/exposure-group.service';
 import { OrganizationService } from '../../services/organization/organization.service';
+import { read } from 'xlsx';
 
 @Component({
   selector: 'app-data',
@@ -39,19 +40,18 @@ export class DataComponent {
   onFileChange(event: any) {
     const file = event.target.files[0];
     const fileReader = new FileReader();
-    fileReader.onload = (e) => {
-      const arrayBuffer: any = fileReader.result;
-      const data = new Uint8Array(arrayBuffer);
-      const workbook = XLSX.read(data, { type: 'array' });
-      const sheetName = workbook.SheetNames[0];
-      this.filterExcelDataForSilica(workbook, sheetName);
+    fileReader.onload = (e: any) => {
+      const workbook = read(e.target.result, { type: 'binary', cellDates: true });
+      const firstSheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[firstSheetName];
+      this.filterExcelDataForSilica(workbook, firstSheetName);
       this.calculateExceedanceFraction();
     };
     fileReader.readAsArrayBuffer(file);
 
   }
   private filterExcelDataForSilica(workbook: XLSX.WorkBook, sheetName: string) {
-    const tempData: SampleInfo[] = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName]);
+    const tempData: SampleInfo[] = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { dateNF: 'yyyy-mm-dd' });
     // filter only to iclude where Agent includes "silica, crystalline quartz"
     // const filteredData = tempData.filter((row: SampleInfo) => row.Agent?.toLowerCase().includes("silica, crystalline quartz"));
     this.excelData = tempData;

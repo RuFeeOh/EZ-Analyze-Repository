@@ -147,6 +147,21 @@ export class EzTableComponent implements AfterViewInit {
 
   formatValue(value: any, col: string | EzColumn): string {
     const fmt = typeof col === 'string' ? undefined : col.Format;
+    const key = this.columnId(col);
+    const formatDateDDMMMYYYY = (v: any): string => {
+      if (!v) return '';
+      const d = new Date(v);
+      if (isNaN(d.getTime())) return '';
+      const dd = String(d.getDate()).padStart(2, '0');
+      const mmm = d.toLocaleString(undefined, { month: 'short' });
+      const yyyy = d.getFullYear();
+      return `${dd}-${mmm}-${yyyy}`;
+    };
+
+    // Auto-format well-known date keys
+    if (key === 'SampleDate' || key === 'ExceedanceFractionDate') {
+      return formatDateDDMMMYYYY(value);
+    }
     if (fmt === 'percent') {
       const num = typeof value === 'number' ? value : Number(value ?? 0);
       return new Intl.NumberFormat(undefined, { style: 'percent', minimumFractionDigits: 1, maximumFractionDigits: 2 }).format(num);
@@ -156,8 +171,7 @@ export class EzTableComponent implements AfterViewInit {
       return new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(num);
     }
     if (fmt === 'date') {
-      const d = value ? new Date(value) : null;
-      return d ? d.toLocaleDateString() : '';
+      return formatDateDDMMMYYYY(value);
     }
     return value ?? '';
   }
