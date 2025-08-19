@@ -1,6 +1,7 @@
 <!-- If items or exposure group data provided, show expandable rows mode -->
 @if (items().length > 0 || data().length > 0) {
 <table mat-table
+    matSort
        [dataSource]="groupTableSource()"
        class="mat-elevation-z8"
        multiTemplateDataRows>
@@ -24,7 +25,8 @@
     @for (column of (summaryColumns().length ? summaryColumns() : defaultSummaryColumns()); track column) {
     <ng-container [matColumnDef]="columnId(column)">
         <th mat-header-cell
-            *matHeaderCellDef>{{ columnHeader(column) }}</th>
+            *matHeaderCellDef
+            mat-sort-header>{{ columnHeader(column) }}</th>
         <td mat-cell
             *matCellDef="let item">{{ valueFor(item, column, 'summary') | ezFormat: column }}</td>
     </ng-container>

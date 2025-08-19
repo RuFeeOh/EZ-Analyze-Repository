@@ -1,6 +1,7 @@
 import { AfterViewInit, Component, computed, input, signal, ViewChild, WritableSignal } from '@angular/core';
 import { MatPaginator, MatPaginatorModule } from '@angular/material/paginator';
 import { MatTableDataSource, MatTableModule } from '@angular/material/table';
+import { MatSort, MatSortModule } from '@angular/material/sort';
 import { CommonModule } from '@angular/common';
 import { ExposureGroup } from '../../models/exposure-group.model';
 import { SampleInfo } from '../../models/sample-info.model';
@@ -16,6 +17,7 @@ import { EzFormatPipe } from '../../pipes/ez-format.pipe';
     CommonModule,
     MatTableModule,
     MatPaginatorModule,
+  MatSortModule,
     MatIconModule,
     MatButtonModule,
     EzFormatPipe,
@@ -34,6 +36,9 @@ export class EzTableComponent implements AfterViewInit {
   detailColumns = input<(string | EzColumn)[]>([]);
   items = input<any[]>([]);
   detailFor = input<(item: any) => any[] | undefined>();
+  // Filtering support (by default, filters by ExposureGroup)
+  filterText = input<string>('');
+  filterKey = input<string>('ExposureGroup');
 
   // Deprecated/back-compat inputs (will be removed when callers migrate)
   displayedColumns = input<(string | EzColumn)[]>(['SampleDate', 'ExposureGroup', 'TWA', 'Notes', 'SampleNumber']);
@@ -42,7 +47,9 @@ export class EzTableComponent implements AfterViewInit {
   detailSource = input<'group' | 'ef'>('group');
 
   @ViewChild(MatPaginator) paginator!: MatPaginator;
+  @ViewChild(MatSort) sort!: MatSort;
   paginatorSignal: WritableSignal<MatPaginator | null> = signal(null);
+  sortSignal: WritableSignal<MatSort | null> = signal(null);
   // Resolve string IDs for columns to satisfy MatTable APIs
   columnIds = computed(() => (this.displayedColumns() ?? []).map(c => typeof c === 'string' ? c : c.Name));
   summaryColumnIds = computed(() => (this.summaryColumns()?.length ? this.summaryColumns() : this.defaultSummaryColumns()).map(c => typeof c === 'string' ? c : c.Name));
@@ -59,16 +66,36 @@ export class EzTableComponent implements AfterViewInit {
     if (this.paginatorSignal()) {
       dataSource.paginator = this.paginatorSignal();
     }
+    if (this.sortSignal()) {
+      dataSource.sort = this.sortSignal()!;
+      dataSource.sortingDataAccessor = (item: any, property: string): any => this.sortAccessor(item, property);
+    }
     return dataSource;
   });
 
   // DataSource for generic items (expandable)
   groupTableSource = computed(() => {
+    // Read filter inputs to make this computed reactive to them
+    const filter = (this.filterText() || '').trim().toLowerCase();
+    const filterKey = this.filterKey();
     const groups = (this.items()?.length ? this.items() : (this.data() ?? []));
     const dataSource = new MatTableDataSource<any>(groups);
     if (this.paginatorSignal()) {
       dataSource.paginator = this.paginatorSignal();
     }
+    if (this.sortSignal()) {
+      dataSource.sort = this.sortSignal()!;
+      dataSource.sortingDataAccessor = (item: any, property: string): any => this.sortAccessor(item, property);
+    }
+    // Filter by exposure group (or configured key)
+    dataSource.filterPredicate = (item: any, filt: string): boolean => {
+      if (!filt) return true;
+      const val = (filterKey === 'ExposureGroup')
+        ? (item?.ExposureGroup ?? item?.Group ?? '')
+        : (item?.[filterKey] ?? '');
+      return String(val).toLowerCase().includes(filt);
+    };
+    dataSource.filter = filter;
     return dataSource;
   });
 
@@ -81,6 +108,7 @@ export class EzTableComponent implements AfterViewInit {
 
   ngAfterViewInit() {
     this.paginatorSignal.set(this.paginator);
+  this.sortSignal.set(this.sort);
   }
 
   private mapExposureGroupsToTableItems(exposureGroups: ExposureGroup[]): ExposureGroupTableItem[] {
@@ -145,6 +173,33 @@ export class EzTableComponent implements AfterViewInit {
     }
     // Default: property lookup
     return item?.[key];
+  }
+
+  // Sorting helper for MatTableDataSource
+  private sortAccessor(item: any, property: string): any {
+    const normalizeDate = (v: any) => {
+      const d = new Date(v);
+      const t = d.getTime();
+      return isNaN(t) ? 0 : t;
+    };
+    if (property === 'ExposureGroup') {
+      return (item?.ExposureGroup ?? item?.Group ?? '').toString().toLowerCase();
+    }
+    if (property === 'Samples' || property === 'SamplesUsed') {
+      return Number(item?.[property] ?? (item?.Results?.length ?? 0));
+    }
+    if (property === 'LatestEF') {
+      const nested = item?.LatestExceedanceFraction?.ExceedanceFraction;
+      return Number(nested ?? item?.LatestEF ?? 0);
+    }
+    if (property === 'ExceedanceFraction' || property === 'TWA') {
+      return Number(item?.[property] ?? 0);
+    }
+    if (property === 'DateCalculated' || property === 'ExceedanceFractionDate' || property === 'SampleDate') {
+      const val = item?.[property] ?? item?.LatestExceedanceFraction?.DateCalculated;
+      return normalizeDate(val);
+    }
+    return item?.[property];
   }
 
   // Formatting is handled by ezFormat pipe in the template.

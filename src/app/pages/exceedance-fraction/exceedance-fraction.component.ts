@@ -30,6 +30,8 @@ export class ExceedanceFractionComponent {
   latestEfItems$!: Observable<any[]>;  // one per group
   // Toggle (default ON)
   showLatest = signal(true);
+  // Quick filter by Exposure Group
+  filter = signal('');
   // Table configuration for ez-table (generic)
   readonly efSummaryColumns = [
     new EzColumn({ Name: 'ExposureGroup', DisplayName: 'Exposure Group' }),
