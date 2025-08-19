@@ -2,6 +2,10 @@
 
 This project was generated using [Angular CLI](https://github.com/angular/angular-cli) version 19.1.7.
 
+## Coding standards
+
+The app should try to prioritize trying to use signals over rxjs observables when possible. Try to follow the DRY (don't repeat yourself) pattern. 
+
 ## App Description
 
 This apps goal is to help expedite the analysis of exceedance probabilities (hereafter known as exceedance franction or EF). The app will allow upload of excel documents for exposureGroups which will have a sampleDate and Time Weighted Average (TWA) and every upload will create a new ExceedanceFraction and store the which samples were part of the EF. The goal is to create a running history for exposureGroups for easy anaylsis of how an exposureGroup has performed over time.

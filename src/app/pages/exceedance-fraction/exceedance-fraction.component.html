@@ -1,4 +1,10 @@
-<ez-table [items]="(latestEfItems$ | async) ?? []"
-          [summaryColumns]="efSummaryColumns"
-          [detailColumns]="efDetailColumns"
-          [detailFor]="efDetailForItem" />
+<div class="ef-toolbar" style="display:flex; align-items:center; gap:12px; margin-bottom:8px;">
+    <mat-slide-toggle [checked]="showLatest()" (change)="showLatest.set($event.checked)">
+        Show Latest
+    </mat-slide-toggle>
+</div>
+
+<ez-table [items]="(showLatest() ? (latestEfItems$ | async) : (efItems$ | async)) ?? []"
+                    [summaryColumns]="efSummaryColumns"
+                    [detailColumns]="efDetailColumns"
+                    [detailFor]="efDetailForItem" />
