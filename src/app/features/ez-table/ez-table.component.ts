@@ -17,7 +17,7 @@ import { EzFormatPipe } from '../../pipes/ez-format.pipe';
     CommonModule,
     MatTableModule,
     MatPaginatorModule,
-  MatSortModule,
+    MatSortModule,
     MatIconModule,
     MatButtonModule,
     EzFormatPipe,
@@ -108,7 +108,7 @@ export class EzTableComponent implements AfterViewInit {
 
   ngAfterViewInit() {
     this.paginatorSignal.set(this.paginator);
-  this.sortSignal.set(this.sort);
+    this.sortSignal.set(this.sort);
   }
 
   private mapExposureGroupsToTableItems(exposureGroups: ExposureGroup[]): ExposureGroupTableItem[] {

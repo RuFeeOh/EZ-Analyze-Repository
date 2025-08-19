@@ -1,7 +1,7 @@
 <!-- If items or exposure group data provided, show expandable rows mode -->
 @if (items().length > 0 || data().length > 0) {
 <table mat-table
-    matSort
+       matSort
        [dataSource]="groupTableSource()"
        class="mat-elevation-z8"
        multiTemplateDataRows>

@@ -102,7 +102,7 @@ export class DataComponent {
     //create a variable to separate the ExposureGroup column into an array
     const exposureGroups: {
       [key: string]: SampleInfo[];
-  } = this.exposureGroupservice.separateSampleInfoByExposureGroup(this.excelData as SampleInfo[]);
+    } = this.exposureGroupservice.separateSampleInfoByExposureGroup(this.excelData as SampleInfo[]);
     //calculate the exceedance fraction for each ExposureGroup
     for (const exposureGroupName in exposureGroups) {
       const exposureGroup = exposureGroups[exposureGroupName];

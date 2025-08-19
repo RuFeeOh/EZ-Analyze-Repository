@@ -21,7 +21,7 @@ export class EzFormatPipe implements PipeTransform {
         };
 
         // Auto-format well-known date keys
-    if (key === 'SampleDate' || key === 'ExceedanceFractionDate' || key === 'DateCalculated') {
+        if (key === 'SampleDate' || key === 'ExceedanceFractionDate' || key === 'DateCalculated') {
             return formatDateDDMMMYYYY(value);
         }
 

@@ -56,7 +56,8 @@
             *matHeaderCellDef>Errors</th>
         <td mat-cell
             *matCellDef="let element">
-            <span *ngIf="element.__invalid" style="color:#c00;">
+            <span *ngIf="element.__invalid"
+                  style="color:#c00;">
                 {{ (element.__errors || []).join('; ') }}
             </span>
         </td>
