@@ -14,7 +14,7 @@ Exceedance fractions are calculated by sorting all the sample data by date and t
 
 ### Data
 
-The data page is currently used for uploading of the excel spreadsheets. There is a table which allows the user to verify its the correct data before clicking the save button
+The data page is currently used for uploading of the excel spreadsheets. There is a table which allows the user to verify its the correct data before clicking the save button. Excel spreadsheets can have multiple exposureGroups so when parsing the data it's important to separate out the data into each exposureGroup
 
 ### Exceedance Fraction
 
