@@ -35,10 +35,25 @@ service cloud.firestore {
       allow create: if isLoggedIn();
     }
     match /exposureGroups/{exposureGroup} {
-      allow read, write, delete: if resource.data != null
-                 && resource.data.OrganizationUid != null
-                 && isUserInOrganization(get(/databases/$(database)/documents/organizations/$(resource.data.OrganizationUid)));
-      allow create: if isLoggedIn();
+      // Allow get() of non-existent docs so clients can transactionally upsert without rule errors
+      allow get: if resource == null || (
+        resource.data != null &&
+        resource.data.OrganizationUid != null &&
+        isUserInOrganization(get(/databases/$(database)/documents/organizations/$(resource.data.OrganizationUid)))
+      );
+
+      // List, queries over exposureGroups must still satisfy org membership on each returned doc
+      allow list: if isLoggedIn();
+
+      // Create validates org membership using the incoming data
+      allow create: if isLoggedIn()
+        && request.resource.data.OrganizationUid != null
+        && isUserInOrganization(get(/databases/$(database)/documents/organizations/$(request.resource.data.OrganizationUid)));
+
+      // Update and delete validate against existing doc's org
+      allow update, delete: if resource.data != null
+        && resource.data.OrganizationUid != null
+        && isUserInOrganization(get(/databases/$(database)/documents/organizations/$(resource.data.OrganizationUid)));
     }
     match /breakdownTask/{task} {
       allow read, write: if isCreator();

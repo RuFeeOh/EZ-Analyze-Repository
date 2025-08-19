@@ -53,8 +53,8 @@ export class DataComponent {
   private filterExcelDataForSilica(workbook: XLSX.WorkBook, sheetName: string) {
     const tempData: SampleInfo[] = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName]);
     // filter only to iclude where Agent includes "silica, crystalline quartz"
-    const filteredData = tempData.filter((row: SampleInfo) => row.Agent?.toLowerCase().includes("silica, crystalline quartz"));
-    this.excelData = filteredData;
+    // const filteredData = tempData.filter((row: SampleInfo) => row.Agent?.toLowerCase().includes("silica, crystalline quartz"));
+    this.excelData = tempData;
   }
 
   calculateExceedanceFraction() {

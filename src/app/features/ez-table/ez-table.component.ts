@@ -130,7 +130,16 @@ export class EzTableComponent implements AfterViewInit {
       return item?.Results?.length ?? 0;
     }
     if (key === 'LatestEF') {
-      return item?.LatestExceedanceFraction?.ExceedanceFraction ?? 0;
+      const nested = item?.LatestExceedanceFraction?.ExceedanceFraction;
+      return nested ?? item?.LatestEF ?? 0;
+    }
+    if (key === 'ExceedanceFractionDate') {
+      const nested = item?.LatestExceedanceFraction?.DateCalculated;
+      return nested ?? item?.ExceedanceFractionDate ?? '';
+    }
+    if (key === 'Latest') {
+      // Always the latest entry in this view; show a simple marker
+      return 'Yes';
     }
     // Default: property lookup
     return item?.[key];

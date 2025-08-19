@@ -24,14 +24,15 @@ export class ExceedanceFractionComponent {
   private orgService = inject(OrganizationService);
   exposureGroups$!: Observable<any[]>;
   resultsData: SampleInfo[] = [];
+  latestEfItems$!: Observable<any[]>;
   // Table configuration for ez-table (generic)
   readonly efSummaryColumns = [
     new EzColumn({ Name: 'ExposureGroup', DisplayName: 'Exposure Group' }),
-    new EzColumn({ Name: 'Samples', DisplayName: 'Samples Used' }),
-    new EzColumn({ Name: 'LatestEF', DisplayName: 'Latest EF', Format: 'percent' })
+    new EzColumn({ Name: 'LatestEF', DisplayName: 'Exceedance Fraction', Format: 'percent' }),
+    new EzColumn({ Name: 'ExceedanceFractionDate', DisplayName: 'Exceedance Fraction Date', Format: 'date' })
   ];
   readonly efDetailColumns: string[] = ['SampleDate', 'ExposureGroup', 'TWA', 'Notes', 'SampleNumber'];
-  readonly efDetailFor = (group: any) => group?.LatestExceedanceFraction?.ResultsUsed ?? [];
+  readonly efDetailForItem = (item: any) => item?.ResultsUsed ?? [];
 
   constructor() {
     const ref = collection(this.firestore, 'exposureGroups');
@@ -40,7 +41,25 @@ export class ExceedanceFractionComponent {
     const q = orgId ? query(ref, where('OrganizationUid', '==', orgId)) : ref;
     this.exposureGroups$ = collectionData(q as any, { idField: 'Uid' }).pipe(map(d => d as any[]));
 
-    // For EF view, we don't need to flatten; ez-table uses groups and EF ResultsUsed for details.
+    // Build latest EF items from each group's history
+    this.latestEfItems$ = this.exposureGroups$.pipe(
+      map(groups => (groups || []).map(g => {
+        const history = (g?.ExceedanceFractionHistory || []) as any[];
+        // pick the latest by DateCalculated; fallback to g.LatestExceedanceFraction
+        let latest = history
+          .slice()
+          .sort((a, b) => new Date(b?.DateCalculated || 0).getTime() - new Date(a?.DateCalculated || 0).getTime())[0];
+        if (!latest) {
+          latest = g?.LatestExceedanceFraction;
+        }
+        return {
+          ExposureGroup: g?.ExposureGroup ?? g?.Group ?? '',
+          LatestEF: latest?.ExceedanceFraction ?? 0,
+          ExceedanceFractionDate: latest?.DateCalculated ?? '',
+          ResultsUsed: latest?.ResultsUsed ?? [],
+        };
+      }))
+    );
   }
 
 }

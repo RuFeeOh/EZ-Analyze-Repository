@@ -1,4 +1,4 @@
-<ez-table [items]="(exposureGroups$ | async) ?? []"
+<ez-table [items]="(latestEfItems$ | async) ?? []"
           [summaryColumns]="efSummaryColumns"
           [detailColumns]="efDetailColumns"
-          [detailFor]="efDetailFor" />
+          [detailFor]="efDetailForItem" />
