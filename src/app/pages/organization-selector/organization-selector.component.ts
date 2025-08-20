@@ -9,10 +9,13 @@ import { MatInputModule } from '@angular/material/input';
 import { CommonModule } from '@angular/common';
 import { Organization } from '../../models/organization.model';
 import { Auth } from '@angular/fire/auth';
+import { MatIconModule } from '@angular/material/icon';
+import { MatMenuModule } from '@angular/material/menu';
+import { OrganizationCircleComponent } from '../../features/organization-circle/organization-circle.component';
 
 @Component({
   selector: 'app-organization-selector',
-  imports: [MatButtonModule, FormsModule, MatFormFieldModule, MatInputModule, CommonModule],
+  imports: [MatButtonModule, FormsModule, MatFormFieldModule, MatInputModule, MatIconModule, MatMenuModule, CommonModule, OrganizationCircleComponent],
   templateUrl: './organization-selector.component.html',
   styleUrl: './organization-selector.component.scss'
 })

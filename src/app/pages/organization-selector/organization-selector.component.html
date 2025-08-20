@@ -1,26 +1,55 @@
-<p>Select Your Organization</p>
-@for (org of organizationList(); track org.Uid) {
-<button mat-flat-button
-        class="orgButton"
-        (click)="setOrganization(org)">
-        <span class="orgName">{{ org.Name }}</span>
-        <span class="deleteX"
-              aria-label="Delete"
-              title="Delete"
-              (click)="$event.stopPropagation(); confirmDelete(org)">×</span>
-</button>
-}
+<div class="org-page">
+        <div class="org-list">
+                <h2>Select Your Organization</h2>
+                <div class="org-grid">
+                        @for (org of organizationList(); track org.Uid) {
+                        <div class="org-chip"
+                             role="button"
+                             tabindex="0"
+                             (click)="setOrganization(org)"
+                             (keydown.enter)="setOrganization(org)"
+                             (keydown.space)="setOrganization(org)"
+                             matTooltip="Use this organization">
+                                <organization-circle [org]="org"></organization-circle>
+                                <span class="label">{{ org.Name }}</span>
+                                <button mat-icon-button
+                                        type="button"
+                                        class="icon-btn"
+                                        aria-label="More actions"
+                                        [matMenuTriggerFor]="menu"
+                                        (click)="$event.stopPropagation()"
+                                        (keydown)="$event.stopPropagation()">
+                                        <mat-icon>more_vert</mat-icon>
+                                </button>
+                                <mat-menu #menu="matMenu">
+                                        <button mat-menu-item
+                                                (click)="confirmDelete(org)">
+                                                <mat-icon>delete</mat-icon>
+                                                <span>Delete</span>
+                                        </button>
+                                </mat-menu>
+                        </div>
+                        }
+                </div>
+        </div>
 
-<form class="Add new org">
-        <p>My organization isn't listed</p>
-        <mat-form-field class="example-full-width">
-                <mat-label>Enter Org</mat-label>
-                <input matInput
-                       placeholder="Name"
-                       [(ngModel)]="organizationName"
-                       name="newOrg">
-        </mat-form-field>
-        <button mat-flat-button
-                (click)="saveOrganization()"
-                class="orgButton">SAVE</button>
-</form>
+        <div class="org-create">
+                <h3>My organization isn’t listed</h3>
+                <form class="create-row"
+                      (ngSubmit)="saveOrganization()">
+                        <mat-form-field appearance="fill"
+                                        class="name-field">
+                                <mat-label>Organization name</mat-label>
+                                <input matInput
+                                       [(ngModel)]="organizationName"
+                                       name="newOrg"
+                                       placeholder="Organization"
+                                       required />
+                        </mat-form-field>
+                        <button mat-flat-button
+                                color="primary"
+                                type="submit"
+                                [disabled]="!organizationName.trim()">Save</button>
+                </form>
+        </div>
+</div>
