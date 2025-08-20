@@ -1,0 +1,8 @@
+<button class="org-circle"
+        type="button"
+        (click)="orgClicked.emit(org())"
+        [disabled]="!org()"
+        [attr.aria-label]="(org()?.Name || 'Select organization')"
+        matTooltip="{{ org()?.Name || 'Select organization' }}">
+  {{ (org()?.Name || '?') | slice:0:1 | uppercase }}
+</button>

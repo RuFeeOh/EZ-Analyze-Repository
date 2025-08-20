@@ -1,0 +1,21 @@
+.org-circle {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: #607d8b;
+  color: #fff;
+  border: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  font-size: 14px;
+  line-height: 32px;
+  cursor: pointer;
+  margin: 0 8px 0 0;
+}
+
+.org-circle:disabled {
+  opacity: 0.6;
+  cursor: default;
+}

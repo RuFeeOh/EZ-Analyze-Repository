@@ -1,7 +1,7 @@
 <mat-toolbar color="primary" class="app-toolbar">
    <span class="app-title">EZ Analyze</span>
    <span class="spacer"></span>
-   <span class="org-chip" *ngIf="organizationService.currentOrg?.Name as orgName">{{ orgName }}</span>
+   <organization-circle [org]="organizationService.currentOrg" (orgClicked)="goToOrg()"></organization-circle>
    <ng-container *ngIf="user$ | async as u; else loginBtn">
       <button mat-button (click)="logout()">Logout</button>
    </ng-container>

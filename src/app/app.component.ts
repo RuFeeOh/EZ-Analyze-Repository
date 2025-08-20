@@ -9,6 +9,8 @@ import { MatToolbarModule } from '@angular/material/toolbar';
 import { MatIconModule } from '@angular/material/icon';
 import { MatMenuModule } from '@angular/material/menu';
 import { Auth, GoogleAuthProvider, signInWithPopup, signOut, user } from '@angular/fire/auth';
+import { OrganizationCircleComponent } from './features/organization-circle/organization-circle.component';
+import { Router } from '@angular/router';
 
 @Component({
   selector: 'app-root',
@@ -23,6 +25,7 @@ import { Auth, GoogleAuthProvider, signInWithPopup, signOut, user } from '@angul
     MatToolbarModule,
     MatIconModule,
     MatMenuModule,
+  OrganizationCircleComponent,
   ],
   templateUrl: './app.component.html',
   styleUrl: './app.component.scss'
@@ -33,6 +36,7 @@ export class AppComponent {
   public organizationService = inject(OrganizationService);
   public auth = inject(Auth);
   public user$ = user(this.auth);
+  private router = inject(Router);
 
   async login() {
     try {
@@ -49,5 +53,9 @@ export class AppComponent {
     } catch {
       // No-op
     }
+  }
+
+  goToOrg() {
+    this.router.navigateByUrl('/org');
   }
 }
