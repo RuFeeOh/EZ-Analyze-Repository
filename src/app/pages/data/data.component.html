@@ -11,12 +11,6 @@
             <mat-icon>attach_file</mat-icon>
             <span>Upload</span>
         </button>
-        <button mat-stroked-button
-                (click)="calculateExceedanceFraction()"
-                [disabled]="totalCount() === 0">
-            <mat-icon>assessment</mat-icon>
-            <span>Recalculate</span>
-        </button>
         <button mat-raised-button
                 color="primary"
                 (click)="saveSampleInfo()"
