@@ -18,9 +18,11 @@ jobs:
           firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_LEADZILLA_CE7AB }}
           channelId: live
           projectId: leadzilla-ce7ab
-      - run: |
-          npm install -g firebase-tools --token "$FIREBASE_TOKEN"
-          firebase deploy --only firestore:rules --project leadzilla-ce7ab --token $FIREBASE_TOKEN
-        env:
-          FIREBASE_DEPLOY_TOKEN: ${{ secrets.FIREBASE_DEPLOY_TOKEN }},
-          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+      - name: Authenticate to Google Cloud (for CLI deploy)
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_LEADZILLA_CE7AB }}
+      - name: Deploy Firestore rules via Firebase CLI
+        run: |
+          npm install -g firebase-tools
+          firebase deploy --only firestore:rules,firestore:indexes --project leadzilla-ce7ab
