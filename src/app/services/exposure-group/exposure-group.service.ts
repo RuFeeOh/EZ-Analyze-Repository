@@ -34,15 +34,15 @@ export class ExposureGroupService {
         const updatedResults: SampleInfo[] = [...existingResults, ...sampleInfo];
 
         if (!snap.exists()) {
-          // Create new document
-          const exposureGroup = new ExposureGroup({
+          // Create new document WITHOUT EF fields (server computes them)
+          const payload = {
             OrganizationUid: organizationUid,
             OrganizationName: organizationName,
             Group: groupName,
             ExposureGroup: groupName,
-            Results: updatedResults
-          });
-          tx.set(docRef as any, JSON.parse(JSON.stringify(exposureGroup)));
+            Results: JSON.parse(JSON.stringify(updatedResults))
+          };
+          tx.set(docRef as any, payload as any);
         } else {
           // Update existing: concat results; EF fields updated server-side
           tx.update(docRef as any, {
@@ -92,14 +92,14 @@ export class ExposureGroupService {
         const updatedResults: SampleInfo[] = [...existingResults, ...d.samples];
 
         if (!d.snap.exists()) {
-          const exposureGroup = new ExposureGroup({
+          const payload = {
             OrganizationUid: organizationUid,
             OrganizationName: organizationName,
             Group: d.groupName,
             ExposureGroup: d.groupName,
-            Results: updatedResults
-          });
-          tx.set(d.docRefInst as any, JSON.parse(JSON.stringify(exposureGroup)));
+            Results: JSON.parse(JSON.stringify(updatedResults))
+          };
+          tx.set(d.docRefInst as any, payload as any);
         } else {
           tx.update(d.docRefInst as any, {
             Results: JSON.parse(JSON.stringify(updatedResults)),

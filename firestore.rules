@@ -48,18 +48,20 @@ service cloud.firestore {
       allow list: if isLoggedIn();
 
       // Create validates org membership and forbids EF fields (server computes them)
+      // Use 'in' to avoid evaluation errors when fields are absent
       allow create: if isLoggedIn()
         && request.resource.data.OrganizationUid != null
         && isUserInOrganization(get(/databases/$(database)/documents/organizations/$(request.resource.data.OrganizationUid)))
-        && request.resource.data.LatestExceedanceFraction == null
-        && request.resource.data.ExceedanceFractionHistory == null;
+        && !('LatestExceedanceFraction' in request.resource.data)
+        && !('ExceedanceFractionHistory' in request.resource.data);
 
       // Update validates org membership and forbids client changes to EF fields
+      // Guard equality comparisons so missing fields don't throw
       allow update: if resource.data != null
         && resource.data.OrganizationUid != null
         && isUserInOrganization(get(/databases/$(database)/documents/organizations/$(resource.data.OrganizationUid)))
-        && request.resource.data.LatestExceedanceFraction == resource.data.LatestExceedanceFraction
-        && request.resource.data.ExceedanceFractionHistory == resource.data.ExceedanceFractionHistory;
+        && ( !('LatestExceedanceFraction' in request.resource.data) || request.resource.data.LatestExceedanceFraction == resource.data.LatestExceedanceFraction )
+        && ( !('ExceedanceFractionHistory' in request.resource.data) || request.resource.data.ExceedanceFractionHistory == resource.data.ExceedanceFractionHistory );
 
       // Delete validates org membership
       allow delete: if resource.data != null

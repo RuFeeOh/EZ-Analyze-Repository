@@ -1,6 +1,8 @@
 import { CommonModule } from '@angular/common';
-import { Component } from '@angular/core';
+import { Component, inject } from '@angular/core';
 import { Auth, GoogleAuthProvider, signInWithPopup, signOut, user } from '@angular/fire/auth';
+import { Router } from '@angular/router';
+import { OrganizationService } from '../../services/organization/organization.service';
 
 
 @Component({
@@ -11,15 +13,24 @@ import { Auth, GoogleAuthProvider, signInWithPopup, signOut, user } from '@angul
 })
 export class LoginComponent {
   public user;
+  private router = inject(Router);
+  private organizationService = inject(OrganizationService);
   constructor(public auth: Auth) {
     this.user = user(this.auth)
   }
 
-  login() {
-    signInWithPopup(this.auth, new GoogleAuthProvider());
+  async login() {
+    try {
+      await signInWithPopup(this.auth, new GoogleAuthProvider());
+      // After successful login, navigate to organization selector
+      this.router.navigateByUrl('/org');
+    } catch (e) {
+      // No-op; allow UI to handle auth errors if needed
+    }
   }
 
   logout() {
+    this.organizationService.clearCurrentOrg();
     signOut(this.auth);
   }
 }

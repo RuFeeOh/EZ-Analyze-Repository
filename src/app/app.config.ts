@@ -16,7 +16,7 @@ export const appConfig: ApplicationConfig = {
     provideFirebaseApp(() => {
       const app = initializeApp(environment.firebase);
       if (environment.useEmulators) {
-        connectAuthEmulator(getAuth(app), 'http://127.0.1:9099');
+        connectAuthEmulator(getAuth(app), 'http://127.0.0.1:9099');
         connectFirestoreEmulator(getFirestore(app), '127.0.0.1', 8080);
       }
       return app;

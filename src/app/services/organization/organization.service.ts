@@ -54,6 +54,11 @@ export class OrganizationService {
     localStorage.setItem('currentOrg', JSON.stringify(org));
   }
 
+  clearCurrentOrg() {
+    this.currentOrg = null;
+    localStorage.removeItem('currentOrg');
+  }
+
   public async saveOrganization(organizationName: string) {
     const userId = this.userUid;
     if (!userId) throw new Error('User not authenticated');

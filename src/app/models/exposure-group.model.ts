@@ -8,9 +8,9 @@ export class ExposureGroup {
     OrganizationName: string = "";
     Group: string = "";
     ExposureGroup: string = "";
-    LatestExceedanceFraction: ExceedanceFraction = new ExceedanceFraction();
+    LatestExceedanceFraction: ExceedanceFraction | null = null;
     Results: SampleInfo[] = [];
-    ExceedanceFractionHistory: ExceedanceFraction[] = [];
+    ExceedanceFractionHistory: ExceedanceFraction[] | null = null;
     constructor(partial: Partial<ExposureGroup>) {
         Object.assign(this, partial);
 
