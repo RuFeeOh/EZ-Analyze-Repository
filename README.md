@@ -14,6 +14,8 @@ This apps goal is to help expedite the analysis of exceedance probabilities (her
 
 Exceedance fractions are calculated by sorting all the sample data by date and taking the 6 (six) most recent samples and running the exceedance fraction formula on those 6.
 
+Note: EF recomputation is performed server-side by a Cloud Function on writes to `exposureGroups`. Clients cannot set `LatestExceedanceFraction` or `ExceedanceFractionHistory`; Firestore rules enforce this and only the function updates those fields.
+
 ## Pages
 
 ### Data

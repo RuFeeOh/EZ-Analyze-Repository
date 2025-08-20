@@ -24,21 +24,14 @@ export class ExposureGroupService {
       const colRef = collection(this.firestore, 'exposureGroups');
       const docRef = doc(colRef, docId);
 
-      // Upsert using a transaction to atomically append history and concatenate results
+      // Upsert using a transaction to atomically concatenate results
       await runTransaction(this.firestore, async (tx) => {
         const snap = await tx.get(docRef as any);
         const existingData: any = snap.exists() ? (snap.data() || {}) : {};
         const existingResults: SampleInfo[] = (existingData?.Results ?? []) as SampleInfo[];
 
-        // Merge results first, then recompute EF from the six most recent samples
+        // Merge results first; EF will be recomputed on the server via Cloud Function
         const updatedResults: SampleInfo[] = [...existingResults, ...sampleInfo];
-
-        const mostRecentSix: SampleInfo[] = this.getMostRecentSamples(updatedResults, 6);
-        const TWAlist: number[] = this.getTWAListFromSampleInfo(mostRecentSix);
-        const efValue: number = TWAlist.length >= 2
-          ? this.exceedanceFractionservice.calculateExceedanceProbability(TWAlist, 0.05)
-          : 0;
-        const latestExceedanceFraction: ExceedanceFraction = this.createExceedanceFraction(efValue, TWAlist, mostRecentSix);
 
         if (!snap.exists()) {
           // Create new document
@@ -47,20 +40,13 @@ export class ExposureGroupService {
             OrganizationName: organizationName,
             Group: groupName,
             ExposureGroup: groupName,
-            Results: updatedResults,
-            LatestExceedanceFraction: latestExceedanceFraction,
-            ExceedanceFractionHistory: [latestExceedanceFraction]
+            Results: updatedResults
           });
           tx.set(docRef as any, JSON.parse(JSON.stringify(exposureGroup)));
         } else {
-          // Update existing: append to history and concat results
-          const existingHistory: any[] = (existingData?.ExceedanceFractionHistory ?? []) as any[];
-          const updatedHistory = [...existingHistory, latestExceedanceFraction];
-
+          // Update existing: concat results; EF fields updated server-side
           tx.update(docRef as any, {
             Results: JSON.parse(JSON.stringify(updatedResults)),
-            LatestExceedanceFraction: JSON.parse(JSON.stringify(latestExceedanceFraction)),
-            ExceedanceFractionHistory: JSON.parse(JSON.stringify(updatedHistory)),
             // keep id fields consistent
             OrganizationUid: organizationUid,
             OrganizationName: organizationName,
@@ -100,16 +86,10 @@ export class ExposureGroupService {
         return { groupName, docId, docRefInst, snap, existingData, samples };
       }));
 
-      // Pass 2: Compute updates and write
+      // Pass 2: Compute updates and write (EF fields updated server-side)
       for (const d of docs) {
         const existingResults: SampleInfo[] = (d.existingData?.Results ?? []) as SampleInfo[];
         const updatedResults: SampleInfo[] = [...existingResults, ...d.samples];
-        const mostRecentSix: SampleInfo[] = this.getMostRecentSamples(updatedResults, 6);
-        const TWAlist: number[] = this.getTWAListFromSampleInfo(mostRecentSix);
-        const efValue: number = TWAlist.length >= 2
-          ? this.exceedanceFractionservice.calculateExceedanceProbability(TWAlist, 0.05)
-          : 0;
-        const latestExceedanceFraction: ExceedanceFraction = this.createExceedanceFraction(efValue, TWAlist, mostRecentSix);
 
         if (!d.snap.exists()) {
           const exposureGroup = new ExposureGroup({
@@ -117,18 +97,12 @@ export class ExposureGroupService {
             OrganizationName: organizationName,
             Group: d.groupName,
             ExposureGroup: d.groupName,
-            Results: updatedResults,
-            LatestExceedanceFraction: latestExceedanceFraction,
-            ExceedanceFractionHistory: [latestExceedanceFraction]
+            Results: updatedResults
           });
           tx.set(d.docRefInst as any, JSON.parse(JSON.stringify(exposureGroup)));
         } else {
-          const existingHistory: any[] = (d.existingData?.ExceedanceFractionHistory ?? []) as any[];
-          const updatedHistory = [...existingHistory, latestExceedanceFraction];
           tx.update(d.docRefInst as any, {
             Results: JSON.parse(JSON.stringify(updatedResults)),
-            LatestExceedanceFraction: JSON.parse(JSON.stringify(latestExceedanceFraction)),
-            ExceedanceFractionHistory: JSON.parse(JSON.stringify(updatedHistory)),
             OrganizationUid: organizationUid,
             OrganizationName: organizationName,
             Group: d.groupName,

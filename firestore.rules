@@ -45,13 +45,22 @@ service cloud.firestore {
       // List, queries over exposureGroups must still satisfy org membership on each returned doc
       allow list: if isLoggedIn();
 
-      // Create validates org membership using the incoming data
+      // Create validates org membership and forbids EF fields (server computes them)
       allow create: if isLoggedIn()
         && request.resource.data.OrganizationUid != null
-        && isUserInOrganization(get(/databases/$(database)/documents/organizations/$(request.resource.data.OrganizationUid)));
+        && isUserInOrganization(get(/databases/$(database)/documents/organizations/$(request.resource.data.OrganizationUid)))
+        && request.resource.data.LatestExceedanceFraction == null
+        && request.resource.data.ExceedanceFractionHistory == null;
 
-      // Update and delete validate against existing doc's org
-      allow update, delete: if resource.data != null
+      // Update validates org membership and forbids client changes to EF fields
+      allow update: if resource.data != null
+        && resource.data.OrganizationUid != null
+        && isUserInOrganization(get(/databases/$(database)/documents/organizations/$(resource.data.OrganizationUid)))
+        && request.resource.data.LatestExceedanceFraction == resource.data.LatestExceedanceFraction
+        && request.resource.data.ExceedanceFractionHistory == resource.data.ExceedanceFractionHistory;
+
+      // Delete validates org membership
+      allow delete: if resource.data != null
         && resource.data.OrganizationUid != null
         && isUserInOrganization(get(/databases/$(database)/documents/organizations/$(resource.data.OrganizationUid)));
     }
