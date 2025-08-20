@@ -11,7 +11,7 @@ const assert = require('assert');
 const { initializeTestEnvironment, assertFails, assertSucceeds } = require('@firebase/rules-unit-testing');
 const { doc, setDoc, getDoc, updateDoc, getFirestore, collection, runTransaction } = require('firebase/firestore');
 
-const PROJECT_ID = 'demo-ez-analyze';
+const PROJECT_ID = process.env.GCLOUD_PROJECT || process.env.FIREBASE_PROJECT || 'demo-ez-analyze';
 
 function toISO(d) {
     if (typeof d === 'string') return new Date(d).toISOString();
@@ -78,77 +78,40 @@ async function run() {
             Group: groupName
         }));
 
-        // 3) Valid create with org membership
+        // 3) Valid create with org membership; EF fields must NOT be set by client
         await assertSucceeds(setDoc(doc(dbUser, 'exposureGroups', docId), {
             OrganizationUid: orgId,
             OrganizationName: 'Org A',
             Group: groupName,
             ExposureGroup: groupName,
-            Results: [],
-            LatestExceedanceFraction: null,
-            ExceedanceFractionHistory: []
+            Results: []
         }));
 
         // 4) Append results and history; emulate recompute uses last 6
         const baseDate = new Date('2025-01-01T00:00:00.000Z');
         const samples = Array.from({ length: 10 }).map((_, i) => makeSample(i + 1, toISO(new Date(baseDate.getTime() + i * 86400000)), groupName, 0.1 + i * 0.01));
 
-        // First update: add 4 samples
+        // First update: add 4 samples; trying to set EF fields should be rejected
         await assertSucceeds(updateDoc(doc(dbUser, 'exposureGroups', docId), {
-            Results: samples.slice(0, 4),
-            LatestExceedanceFraction: {
-                ExceedanceFraction: 0.2,
-                DateCalculated: toISO(new Date('2025-02-01')),
-                OELNumber: 0.05,
-                MostRecentNumber: 4,
-                ResultsUsed: samples.slice(0, 4)
-            },
-            ExceedanceFractionHistory: [
-                {
-                    ExceedanceFraction: 0.2,
-                    DateCalculated: toISO(new Date('2025-02-01')),
-                    OELNumber: 0.05,
-                    MostRecentNumber: 4,
-                    ResultsUsed: samples.slice(0, 4)
-                }
-            ]
+            Results: samples.slice(0, 4)
+        }));
+        await assertFails(updateDoc(doc(dbUser, 'exposureGroups', docId), {
+            LatestExceedanceFraction: { ExceedanceFraction: 0.2 },
         }));
 
-        // Second update: concat 6 more samples; EF should use last 6 chronologically when recomputed by app code
+        // Second update: concat 6 more samples
         await assertSucceeds(updateDoc(doc(dbUser, 'exposureGroups', docId), {
-            Results: samples, // concatenated 10
-            ExceedanceFractionHistory: [
-                {
-                    ExceedanceFraction: 0.2,
-                    DateCalculated: toISO(new Date('2025-02-01')),
-                    OELNumber: 0.05,
-                    MostRecentNumber: 4,
-                    ResultsUsed: samples.slice(0, 4)
-                },
-                {
-                    ExceedanceFraction: 0.3,
-                    DateCalculated: toISO(new Date('2025-02-10')),
-                    OELNumber: 0.05,
-                    MostRecentNumber: 6,
-                    ResultsUsed: samples.slice(4, 10) // last 6
-                }
-            ],
-            LatestExceedanceFraction: {
-                ExceedanceFraction: 0.3,
-                DateCalculated: toISO(new Date('2025-02-10')),
-                OELNumber: 0.05,
-                MostRecentNumber: 6,
-                ResultsUsed: samples.slice(4, 10)
-            }
+            Results: samples // concatenated 10
         }));
 
         // Verify state
         const final = await readGroup(dbUser, docId);
         assert(final, 'exposureGroup should exist');
         assert.equal(final.Results.length, 10, 'Results should concatenate');
-        assert.equal(final.ExceedanceFractionHistory.length, 2, 'History should append');
-        assert.equal(final.LatestExceedanceFraction.MostRecentNumber, 6);
-        assert.equal(final.LatestExceedanceFraction.ResultsUsed.length, 6);
+        // In rules-only tests (no functions), EF fields should not be writable by client
+        // and will remain unset here.
+        assert(!('LatestExceedanceFraction' in final) || final.LatestExceedanceFraction == null);
+        assert(!('ExceedanceFractionHistory' in final) || Array.isArray(final.ExceedanceFractionHistory) === false || final.ExceedanceFractionHistory.length === 0);
 
         // 5) Intruder cannot read/write other org exposureGroups
         await assertFails(getDoc(doc(dbOther, 'exposureGroups', docId)));

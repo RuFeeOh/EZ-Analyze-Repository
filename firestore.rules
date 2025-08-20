@@ -24,9 +24,11 @@ service cloud.firestore {
     }
     
     function isUserInOrganization(organizationResource) {
-      return true
-      && organizationResource.data.UserUids != null
-      && request.auth.uid in organizationResource.data.UserUids
+      return request.auth != null
+        && organizationResource != null
+        && organizationResource.data != null
+        && organizationResource.data.UserUids != null
+        && request.auth.uid in organizationResource.data.UserUids;
     }
     match /organizations/{organization} {
       allow read: if isUserInOrganization(resource);

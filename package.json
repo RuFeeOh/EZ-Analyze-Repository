@@ -10,7 +10,8 @@
     "build": "ng build",
     "watch": "ng build --watch --configuration development",
     "test": "ng test",
-    "test:rules": "firebase emulators:exec --only firestore 'node tests/firestore/run.js'"
+    "test:rules": "firebase emulators:exec --only firestore 'node tests/firestore/run.js'",
+    "test:rules:attach": "FIRESTORE_EMULATOR_HOST=localhost:8080 node tests/firestore/run.js"
   },
   "private": true,
   "dependencies": {
@@ -45,6 +46,6 @@
     "typescript": "~5.7.2",
     "concurrently": "^8.2.2",
     "firebase-tools": "^13.0.0",
-    "@firebase/rules-unit-testing": "^3.0.0"
+    "@firebase/rules-unit-testing": "^4.0.0"
   }
 }
