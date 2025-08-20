@@ -18,13 +18,22 @@ Note: EF recomputation is performed server-side by a Cloud Function on writes to
 
 ## Pages
 
+### Org
+
+The user can create an organizations. Upon creating an organization, the newly created org will be selected. The user can create, select, and delete any of the orgs in their selection. This page will also show orgs shared by other users which will be marked differently. Users will not be able to delete organizations which are not their own.
+
 ### Data
 
 The data page is currently used for uploading of the excel spreadsheets. There is a table which allows the user to verify its the correct data before clicking the save button. Excel spreadsheets can have multiple exposureGroups so when parsing the data it's important to separate out the data into each exposureGroup
 
 ### Exceedance Fraction
 
-The exceedance fraction page will show all the exceedance fractions for all the exposureGroups. There will be a grid showing the exposureGroup, ExceedanceFraction, Calculation Date, and how many samples were used for the calculation. The grid will be sorted so the most recent calculated exceedance fractions are at the top. Each row will be able to expand to show the samples that were used. Above the grid will be a toggle to "Show Latest" which will filter the grid to show only the latest exceedance fraction per exposureGroup; this toggle will be on by default.
+The exceedance fraction page will show all the exceedance fractions for all the exposureGroups in the current organization. There will be a grid showing the exposureGroup, ExceedanceFraction, Calculation Date, and how many samples were used for the calculation. The grid will be sorted so the most recent calculated exceedance fractions are at the top. Each row will be able to expand to show the samples that were used. Above the grid will be a toggle to "Show Latest" which will filter the grid to show only the latest exceedance fraction per exposureGroup; this toggle will be on by default.
+
+
+## Privacy and sharing
+
+Users will be able to create an organization. This organizaiton will be scoped to themselves but they will also be able to share organizations with other users. In order to share an organization the user will navigate to the org page, select share on an org, and then type in the email of the person they'd like to share with. By default users will see all exposureGroups in the selected organiation even if it is shared. The user who owns an organization will be able to mark exposureGroups as private if they'd like to keep it private. By default all of them are shared.
 
 ## Development server
 

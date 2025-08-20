@@ -43,11 +43,11 @@ export class ExceedanceFractionComponent {
   readonly efDetailForItem = (item: any) => item?.ResultsUsed ?? [];
 
   constructor() {
-    const ref = collection(this.firestore, 'exposureGroups');
-    // Prefer filtering by current org to satisfy rules and reduce data
     const orgId = this.orgService.currentOrg?.Uid;
-    const q = orgId ? query(ref, where('OrganizationUid', '==', orgId)) : ref;
-    this.exposureGroups$ = collectionData(q as any, { idField: 'Uid' }).pipe(map(d => d as any[]));
+    const ref = orgId
+      ? collection(this.firestore, `organizations/${orgId}/exposureGroups`)
+      : collection(this.firestore, 'organizations/unknown/exposureGroups');
+    this.exposureGroups$ = collectionData(ref as any, { idField: 'Uid' }).pipe(map(d => d as any[]));
 
     // Build full history EF items (flattened) and sort desc by DateCalculated
     this.efItems$ = this.exposureGroups$.pipe(

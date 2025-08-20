@@ -5,10 +5,16 @@ import { MatIconModule } from '@angular/material/icon';
 import { MatButtonModule } from '@angular/material/button';
 import { SampleInfo } from '../../models/sample-info.model';
 import { MatTableModule } from '@angular/material/table';
+import { MatSnackBarModule } from '@angular/material/snack-bar';
 import { ExceedanceFractionService } from '../../services/exceedance-fraction/exceedance-fraction.service';
 import { ExposureGroupService } from '../../services/exposure-group/exposure-group.service';
 import { OrganizationService } from '../../services/organization/organization.service';
 import { read } from 'xlsx';
+import { Firestore } from '@angular/fire/firestore';
+import { Auth } from '@angular/fire/auth';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { EfRecomputeTrackerService } from '../../services/exceedance-fraction/ef-recompute-tracker.service';
+import { SnackService } from '../../services/ui/snack.service';
 
 @Component({
   selector: 'app-data',
@@ -17,6 +23,7 @@ import { read } from 'xlsx';
     MatIconModule,
     MatButtonModule,
     MatTableModule,
+    MatSnackBarModule,
 
   ],
   templateUrl: './data.component.html',
@@ -26,6 +33,10 @@ export class DataComponent {
   exceedanceFractionservice = inject(ExceedanceFractionService)
   exposureGroupservice = inject(ExposureGroupService)
   organizationservice = inject(OrganizationService)
+  efTracker = inject(EfRecomputeTrackerService)
+  private snackBar: SnackService = inject(SnackService)
+  private firestore = inject(Firestore)
+  private auth = inject(Auth)
   // Parsed + validated rows (SampleInfo with validation metadata)
   excelData: (SampleInfo & { __invalid?: boolean; __errors?: string[] })[] = [];
   exceedanceFraction!: number;
@@ -122,11 +133,71 @@ export class DataComponent {
   async saveSampleInfo() {
     const currentOrg = this.organizationservice.currentOrg;
     if (!currentOrg) { throw new Error("No current organization") }
+    const uid = this.auth.currentUser?.uid;
+    if (!uid) {
+      this.snackBar.open('Please sign in to save data.', 'Dismiss', { duration: 4000, verticalPosition: "top" });
+      return;
+    }
+    // Ensure org exists in this environment and user is a member (helps when using emulators)
+    try {
+      const orgRef = doc(this.firestore as any, `organizations/${currentOrg.Uid}`);
+      const snap = await getDoc(orgRef as any);
+      if (!snap.exists()) {
+        // Seed minimal org document so membership rule passes (only safe in emulator or new env)
+        await setDoc(orgRef as any, { Uid: currentOrg.Uid, Name: currentOrg.Name, UserUids: uid ? [uid] : [] });
+      } else {
+        const data: any = snap.data();
+        const members: string[] = Array.isArray(data?.UserUids) ? data.UserUids : [];
+        if (uid && !members.includes(uid)) {
+          // Cannot update membership due to rules; surface a clear error
+          this.snackBar.open('You are not a member of the selected organization in this environment. Re-select or create an org on the Org page.', 'Dismiss', { duration: 6000, verticalPosition: "top" });
+          return;
+        }
+      }
+    } catch (e) {
+      // Non-fatal: continue to let save attempt report precise error
+      console.warn('Org membership check failed', e);
+    }
     // Only save valid rows
     const validRows = (this.excelData || []).filter(r => !r.__invalid) as SampleInfo[];
     // Separate into exposure groups and save each group concurrently
     const grouped = this.exposureGroupservice.separateSampleInfoByExposureGroup(validRows);
-    await this.exposureGroupservice.saveGroupedSampleInfo(grouped, currentOrg.Uid, currentOrg.Name);
+    // Track recompute: snapshot the time and the doc ids that will be affected
+    const startIso = new Date().toISOString();
+    const ids = Object.keys(grouped).map(name => this.slugify(name));
+    // Show progress snackbar
+    const total = ids.length;
+    let snackRef = this.snackBar.open(total > 0 ? `Recomputing EF… 0/${total}` : 'Saving…', undefined, { verticalPosition: "top" });
+    try {
+      await this.exposureGroupservice.saveGroupedSampleInfo(grouped, currentOrg.Uid, currentOrg.Name);
+      // If there are no groups to recompute, finish early
+      if (total === 0) {
+        snackRef.dismiss();
+        this.snackBar.open('Nothing to recompute.', 'OK', { duration: 2000, verticalPosition: "top" });
+        return;
+      }
+      const res = await this.efTracker.waitForEf(
+        currentOrg.Uid,
+        ids,
+        startIso,
+        (done, totalCount) => {
+          // Update snackbar message on progress
+          snackRef.dismiss();
+          snackRef = this.snackBar.open(`Recomputing EF… ${done}/${totalCount}`, undefined, { verticalPosition: "top" });
+        },
+        60000
+      );
+      snackRef.dismiss();
+      if (res.timedOut) {
+        this.snackBar.open('EF recompute is taking longer than expected. Values will appear when ready.', 'Dismiss', { duration: 5000 });
+      } else {
+        this.snackBar.open('EF recompute complete.', 'OK', { duration: 3000 });
+      }
+    } catch (e) {
+      snackRef.dismiss();
+      this.snackBar.open('Save failed. Please try again.', 'Dismiss', { duration: 5000 });
+      throw e;
+    }
   }
 
   // Helpers
@@ -167,5 +238,15 @@ export class DataComponent {
       return isNaN(d.getTime()) ? null : d;
     }
     return null;
+  }
+
+  private slugify(text: string): string {
+    return (text || '')
+      .toLowerCase()
+      .trim()
+      .replace(/\s+/g, '-')
+      .replace(/[^a-z0-9\-]/g, '')
+      .replace(/-+/g, '-')
+      .slice(0, 120);
   }
 }

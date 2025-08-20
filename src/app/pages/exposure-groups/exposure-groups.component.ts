@@ -1,7 +1,7 @@
 import { Component, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Firestore } from '@angular/fire/firestore';
-import { collection, query, where } from 'firebase/firestore';
+import { collection } from 'firebase/firestore';
 import { collectionData } from '@angular/fire/firestore';
 import { OrganizationService } from '../../services/organization/organization.service';
 import { EzTableComponent } from '../../features/ez-table/ez-table.component';
@@ -22,9 +22,8 @@ export class ExposureGroupsComponent {
     readonly detailForFn = (group: any) => group?.Results ?? [];
 
     constructor() {
-        const ref = collection(this.firestore, 'exposureGroups');
-        const orgId = this.orgService.currentOrg?.Uid;
-        const q = orgId ? query(ref, where('OrganizationUid', '==', orgId)) : ref;
-        this.exposureGroups$ = collectionData(q as any, { idField: 'Uid' }).pipe(map(d => d as any[]));
+        const orgId = this.orgService.currentOrg?.Uid || 'unknown';
+        const refShared = collection(this.firestore, `organizations/${orgId}/exposureGroups`);
+        this.exposureGroups$ = collectionData(refShared as any, { idField: 'Uid' }).pipe(map(d => d as any[]));
     }
 }

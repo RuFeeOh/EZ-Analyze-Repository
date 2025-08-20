@@ -88,22 +88,27 @@ function createExceedanceFraction(exceedanceFraction: number, resultsUsed: Sampl
     };
 }
 
-export const recomputeExceedanceFraction = onDocumentWritten("exposureGroups/{docId}", async (event: any) => {
+export const recomputeExceedanceFraction = onDocumentWritten("organizations/{orgId}/exposureGroups/{docId}", async (event: any) => {
     const before = event.data?.before?.data() as any | undefined;
     const after = event.data?.after?.data() as any | undefined;
     const docId = event.params.docId as string;
-    if (!after) return; // deleted
+    if (!after) {
+        logger.info(`EF trigger: document deleted, skipping: organizations/${event.params.orgId}/exposureGroups/${docId}`);
+        return;
+    }
 
     // Only recompute when Results changed or EF fields missing
     const beforeResultsStr = JSON.stringify(before?.Results || []);
     const afterResultsStr = JSON.stringify(after.Results || []);
     const efMissing = !after.LatestExceedanceFraction || !Array.isArray(after.ExceedanceFractionHistory);
     if (!efMissing && beforeResultsStr === afterResultsStr) {
+        logger.info(`EF trigger: no change in Results and EF present, skipping for ${docId}`);
         return;
     }
 
     const db = admin.firestore();
-    const ref = db.doc(`exposureGroups/${docId}`);
+    const orgId = event.params.orgId as string;
+    const ref = db.doc(`organizations/${orgId}/exposureGroups/${docId}`);
 
     await db.runTransaction(async (tx: any) => {
         const snap = await tx.get(ref);
@@ -123,5 +128,5 @@ export const recomputeExceedanceFraction = onDocumentWritten("exposureGroups/{do
         });
     });
 
-    logger.info(`Recomputed EF for exposureGroups/${docId}`);
+    logger.info(`Recomputed EF for organizations/${event.params.orgId}/exposureGroups/${docId}`);
 });

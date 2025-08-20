@@ -36,38 +36,27 @@ service cloud.firestore {
       allow delete: if isUserInOrganization(resource);
       allow create: if isLoggedIn();
     }
+    // Legacy flat collection locked down (no access)
     match /exposureGroups/{exposureGroup} {
-      // Allow get() of non-existent docs so clients can transactionally upsert without rule errors
-      allow get: if resource == null || (
-        resource.data != null &&
-        resource.data.OrganizationUid != null &&
-        isUserInOrganization(get(/databases/$(database)/documents/organizations/$(resource.data.OrganizationUid)))
-      );
+      allow read, write: if false;
+    }
 
-      // List, queries over exposureGroups must still satisfy org membership on each returned doc
-      allow list: if isLoggedIn();
-
-      // Create validates org membership and forbids EF fields (server computes them)
-      // Use 'in' to avoid evaluation errors when fields are absent
-      allow create: if isLoggedIn()
-        && request.resource.data.OrganizationUid != null
-        && isUserInOrganization(get(/databases/$(database)/documents/organizations/$(request.resource.data.OrganizationUid)))
+    // Scoped exposure groups under organization
+    match /organizations/{orgId}/exposureGroups/{exposureGroup} {
+      // Allow read/write if user is a member of the organization
+      allow get, list: if isUserInOrganization(get(/databases/$(database)/documents/organizations/$(orgId)));
+      // Create forbids EF fields
+      allow create: if isUserInOrganization(get(/databases/$(database)/documents/organizations/$(orgId)))
         && !('LatestExceedanceFraction' in request.resource.data)
         && !('ExceedanceFractionHistory' in request.resource.data);
-
-      // Update validates org membership and forbids client changes to EF fields
-      // Guard equality comparisons so missing fields don't throw
-      allow update: if resource.data != null
-        && resource.data.OrganizationUid != null
-        && isUserInOrganization(get(/databases/$(database)/documents/organizations/$(resource.data.OrganizationUid)))
+      // Update forbids client changes to EF fields
+      allow update: if isUserInOrganization(get(/databases/$(database)/documents/organizations/$(orgId)))
         && ( !('LatestExceedanceFraction' in request.resource.data) || request.resource.data.LatestExceedanceFraction == resource.data.LatestExceedanceFraction )
         && ( !('ExceedanceFractionHistory' in request.resource.data) || request.resource.data.ExceedanceFractionHistory == resource.data.ExceedanceFractionHistory );
-
-      // Delete validates org membership
-      allow delete: if resource.data != null
-        && resource.data.OrganizationUid != null
-        && isUserInOrganization(get(/databases/$(database)/documents/organizations/$(resource.data.OrganizationUid)));
+      // Delete
+      allow delete: if isUserInOrganization(get(/databases/$(database)/documents/organizations/$(orgId)));
     }
+
     match /breakdownTask/{task} {
       allow read, write: if isCreator();
       allow list: if isCreator();

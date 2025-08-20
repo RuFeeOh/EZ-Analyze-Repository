@@ -18,10 +18,10 @@ export class ExposureGroupService {
 
   async saveSampleInfo(sampleInfo: SampleInfo[], organizationUid: string, organizationName: string) {
     try {
-      // Deterministic document ID to avoid duplicates: orgUid + slug(group)
+      // Deterministic document ID within org: slug(group)
       const groupName = sampleInfo[0]?.ExposureGroup || 'unknown-group';
-      const docId = `${organizationUid}__${this.slugify(groupName)}`;
-      const colRef = collection(this.firestore, 'exposureGroups');
+      const docId = this.slugify(groupName);
+      const colRef = collection(this.firestore, `organizations/${organizationUid}/exposureGroups`);
       const docRef = doc(colRef, docId);
 
       // Upsert using a transaction to atomically concatenate results
@@ -69,7 +69,7 @@ export class ExposureGroupService {
    * Returns an array of { id: string, groupName: string } for saved docs.
    */
   async saveGroupedSampleInfo(groups: { [groupName: string]: SampleInfo[] }, organizationUid: string, organizationName: string) {
-    const colRef = collection(this.firestore, 'exposureGroups');
+    const colRef = collection(this.firestore, `organizations/${organizationUid}/exposureGroups`);
     const entries = Object.entries(groups || {}).filter(([_, arr]) => (arr?.length ?? 0) > 0);
     if (entries.length === 0) return [];
 
@@ -79,7 +79,7 @@ export class ExposureGroupService {
       // Pass 1: Read all docs first
       const docs = await Promise.all(entries.map(async ([groupNameRaw, samples]) => {
         const groupName = groupNameRaw || samples[0]?.ExposureGroup || 'unknown-group';
-        const docId = `${organizationUid}__${this.slugify(groupName)}`;
+        const docId = this.slugify(groupName);
         const docRefInst = doc(colRef, docId);
         const snap = await tx.get(docRefInst as any);
         const existingData: any = snap.exists() ? (snap.data() || {}) : {};
