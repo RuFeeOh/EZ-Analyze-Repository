@@ -32,3 +32,29 @@ jobs:
           folder: ./docs/browser
           token: ${{ secrets.GITHUB_TOKEN }}
           target-folder: "./docs"
+
+  firebase:
+    name: Deploy Firebase (Functions/Rules/Hosting)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Use Node 22 (matches functions engines)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install root deps and build Angular
+        run: |
+          npm ci
+          npm run build
+
+      - name: Install Firebase CLI
+        run: npm install -g firebase-tools
+
+      - name: Deploy Firebase
+        env:
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+        run: |
+          firebase deploy --project leadzilla-ce7ab --only functions,firestore:rules,firestore:indexes,hosting

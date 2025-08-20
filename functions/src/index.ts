@@ -88,7 +88,7 @@ function createExceedanceFraction(exceedanceFraction: number, resultsUsed: Sampl
     };
 }
 
-export const recomputeExceedanceFraction = onDocumentWritten("exposureGroups/{docId}", async (event) => {
+export const recomputeExceedanceFraction = onDocumentWritten("exposureGroups/{docId}", async (event: any) => {
     const before = event.data?.before?.data() as any | undefined;
     const after = event.data?.after?.data() as any | undefined;
     const docId = event.params.docId as string;
@@ -105,7 +105,7 @@ export const recomputeExceedanceFraction = onDocumentWritten("exposureGroups/{do
     const db = admin.firestore();
     const ref = db.doc(`exposureGroups/${docId}`);
 
-    await db.runTransaction(async (tx) => {
+    await db.runTransaction(async (tx: any) => {
         const snap = await tx.get(ref);
         if (!snap.exists) return;
         const data = snap.data() || {} as any;
