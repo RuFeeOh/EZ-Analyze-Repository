@@ -20,7 +20,7 @@
                     aria-label="expand row"
                     (click)="toggle(group); $event.stopPropagation()"
                     [class.expanded]="isExpanded(group)">
-                <mat-icon>{{ isExpanded(group) ? 'keyboard_arrow_up' : 'keyboard_arrow_down' }}</mat-icon>
+                <mat-icon>{{ isExpanded(group) ? 'keyboard_arrow_down' : 'keyboard_arrow_right' }}</mat-icon>
             </button>
         </td>
     </ng-container>
@@ -43,7 +43,6 @@
             [attr.colspan]="groupColumns.length">
             <div class="detail-wrapper"
                  [class.detail-expanded]="isExpanded(group)">
-                @if (isExpanded(group)) {
                 <table mat-table
                        [dataSource]="detailsForItem(group)"
                        class="nested-table">
@@ -60,7 +59,6 @@
                     <tr mat-row
                         *matRowDef="let row; columns: detailColumnIds();"></tr>
                 </table>
-                }
             </div>
         </td>
     </ng-container>
@@ -72,7 +70,7 @@
         (click)="toggle(row)"
         class="group-row"></tr>
     <tr mat-row
-        *matRowDef="let row; columns: ['expandedDetail']"
+        *matRowDef="let row; columns: ['expandedDetail']; when: rowIsExpanded"
         class="detail-row"></tr>
 </table>
 } @else {

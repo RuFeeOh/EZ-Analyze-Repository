@@ -52,9 +52,11 @@ export class ExceedanceFractionComponent {
     // Build full history EF items (flattened) and sort desc by DateCalculated
     this.efItems$ = this.exposureGroups$.pipe(
       map(groups => (groups || []).flatMap(g => {
+        const name = g?.ExposureGroup ?? g?.Group ?? '';
         const history = (g?.ExceedanceFractionHistory || []) as any[];
-        return history.map(ef => ({
-          ExposureGroup: g?.ExposureGroup ?? g?.Group ?? '',
+        return history.map((ef, idx) => ({
+          Uid: `${name}__${ef?.DateCalculated || 'no-date'}__${idx}`,
+          ExposureGroup: name,
           ExceedanceFraction: ef?.ExceedanceFraction ?? 0,
           DateCalculated: ef?.DateCalculated ?? '',
           SamplesUsed: (ef?.ResultsUsed ?? []).length,
@@ -66,6 +68,7 @@ export class ExceedanceFractionComponent {
     // Build latest EF items from each group's history; same shape as full history
     this.latestEfItems$ = this.exposureGroups$.pipe(
       map(groups => (groups || []).map(g => {
+        const name = g?.ExposureGroup ?? g?.Group ?? '';
         const history = (g?.ExceedanceFractionHistory || []) as any[];
         let latest = history
           .slice()
@@ -74,7 +77,8 @@ export class ExceedanceFractionComponent {
           latest = g?.LatestExceedanceFraction;
         }
         return {
-          ExposureGroup: g?.ExposureGroup ?? g?.Group ?? '',
+          Uid: `${name}__latest__${latest?.DateCalculated || 'no-date'}`,
+          ExposureGroup: name,
           ExceedanceFraction: latest?.ExceedanceFraction ?? 0,
           DateCalculated: latest?.DateCalculated ?? '',
           SamplesUsed: (latest?.ResultsUsed ?? []).length,

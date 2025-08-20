@@ -1,6 +1,6 @@
 import { AfterViewInit, Component, computed, input, signal, ViewChild, WritableSignal, inject } from '@angular/core';
 import { MatPaginator, MatPaginatorModule } from '@angular/material/paginator';
-import { MatTableDataSource, MatTableModule } from '@angular/material/table';
+import { MatTable, MatTableDataSource, MatTableModule } from '@angular/material/table';
 import { MatSort, MatSortModule, Sort } from '@angular/material/sort';
 import { CommonModule } from '@angular/common';
 import { ExposureGroup } from '../../models/exposure-group.model';
@@ -57,6 +57,7 @@ export class EzTableComponent implements AfterViewInit {
   private defaultSortApplied = false;
   paginatorSignal: WritableSignal<MatPaginator | null> = signal(null);
   sortSignal: WritableSignal<MatSort | null> = signal(null);
+  @ViewChild(MatTable) private table?: MatTable<any>;
 
   // Use setters so we catch when the view branch with matSort/matPaginator appears later
   @ViewChild(MatPaginator)
@@ -162,7 +163,8 @@ export class EzTableComponent implements AfterViewInit {
     }
   }
 
-  expandedGroup: any | null = null;
+  // Track expansion by a stable key (Uid if provided, else group name)
+  private expandedKey: string | null = null;
 
   ngAfterViewInit() {
     // Nothing needed here; we attach sort/paginator in the @ViewChild setters because
@@ -209,13 +211,25 @@ export class EzTableComponent implements AfterViewInit {
     }));
   }
 
-  isExpanded(group: ExposureGroup): boolean {
-    return this.expandedGroup === group;
+  private groupKey(group: any): string {
+    if (group?.Uid) return String(group.Uid);
+    return (group?.ExposureGroup ?? group?.Group ?? '').toString();
   }
 
-  toggle(group: ExposureGroup) {
-    this.expandedGroup = this.isExpanded(group) ? null : group;
+  isExpanded(group: any): boolean {
+    if (!group) return false;
+    return this.expandedKey === this.groupKey(group);
   }
+
+  toggle(group: any) {
+    const key = this.groupKey(group);
+    this.expandedKey = (this.expandedKey === key) ? null : key;
+    // Ensure table re-renders row defs (including the detail row) immediately
+    try { this.table?.renderRows(); } catch { }
+  }
+
+  // Row predicate to render expanded detail rows only for expanded items
+  rowIsExpanded = (_index: number, row: any) => this.expandedKey === this.groupKey(row);
 
   // Template helpers
   columnId(col: string | EzColumn): string {

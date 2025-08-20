@@ -16,6 +16,18 @@
     width: 100%;
 }
 
-button.expanded mat-icon {
-    transform: rotate(180deg);
+/* Collapse the detail row height when not expanded and animate expansion */
+tr.detail-row {
+    height: 0;
+}
+
+.detail-wrapper {
+    display: grid;
+    grid-template-rows: 0fr;
+    grid-template-columns: 100%;
+    transition: grid-template-rows 225ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.detail-wrapper.detail-expanded {
+    grid-template-rows: 1fr;
 }
