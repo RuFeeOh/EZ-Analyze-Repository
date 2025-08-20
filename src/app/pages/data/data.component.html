@@ -3,48 +3,58 @@
        (change)="onFileChange($event)"
        #fileUpload>
 
-<div class="file-upload">
+<div class="toolbar">
+    <div class="actions">
+        <button mat-stroked-button
+                color="primary"
+                (click)="fileUpload.click()">
+            <mat-icon>attach_file</mat-icon>
+            <span>Upload</span>
+        </button>
+        <button mat-stroked-button
+                (click)="calculateExceedanceFraction()"
+                [disabled]="totalCount() === 0">
+            <mat-icon>assessment</mat-icon>
+            <span>Recalculate</span>
+        </button>
+        <button mat-raised-button
+                color="primary"
+                (click)="saveSampleInfo()"
+                [disabled]="validCount() === 0">
+            <mat-icon>save</mat-icon>
+            <span>Save</span>
+        </button>
+    </div>
+    <div class="status"
+         *ngIf="totalCount() > 0">
+        <mat-chip-set>
+            <mat-chip [disabled]="true"
+                      matTooltip="Selected file name">{{ fileName() || 'File' }}</mat-chip>
+            <mat-chip [disabled]="true"
+                      matTooltip="Valid / Total rows">{{ validCount() }}/{{ totalCount() }} rows</mat-chip>
+            <mat-chip [disabled]="true"
+                      *ngIf="hasInvalidRows()"
+                      color="warn"
+                      [matTooltip]="errorTooltip()">{{ invalidCount() }} rows invalid</mat-chip>
+        </mat-chip-set>
+    </div>
+    <div class="ef"
+         *ngIf="exceedanceFraction as ef">
+        <span class="ef-label">Overall EF:</span>
+        <span class="ef-value">{{ ef | number:'1.2-4' }}</span>
+    </div>
 
-    <button mat-mini-fab
-            color="primary"
-            class="upload-btn"
-            (click)="fileUpload.click()">
-        <mat-icon>attach_file</mat-icon>
-    </button>
-    @if(excelData){
-    Uploaded!
-    }
-    @else {
-    <p>Click the button to upload data</p>
-    }
-    <button mat-mini-fab
-            color="primary"
-            class="upload-btn"
-            (click)="calculateExceedanceFraction()">
-        <mat-icon>assessment</mat-icon>
-    </button>
-    {{exceedanceFraction}}
-    {{exceedanceFraction}}
-    <button mat-mini-fab
-            color="primary"
-            class="upload-btn"
-            (click)="saveSampleInfo()">
-        <mat-icon>save</mat-icon>
-    </button>
-    @if (hasInvalidRows()) {
-    <span style="color:#c00; margin-left:8px;">{{invalidCount()}} invalid row(s)</span>
-    }
 </div>
 
 
 <table mat-table
-       [dataSource]="excelData"
+       [dataSource]="excelData()"
        multiTemplateDataRows
        class="mat-elevation-z8">
     @for (column of columnsToDisplay; track column) {
     <ng-container [matColumnDef]="column">
         <th mat-header-cell
-            *matHeaderCellDef>{{column}}</th>
+            *matHeaderCellDef>{{ headerLabels[column] || column }}</th>
         <td mat-cell
             *matCellDef="let element">
             {{ column === 'SampleDate' ? (element[column] | date:'dd-MMM-yyyy') : element[column] }}
@@ -63,55 +73,11 @@
             </span>
         </td>
     </ng-container>
-    <ng-container matColumnDef="expand">
-        <th mat-header-cell
-            *matHeaderCellDef
-            aria-label="row actions">&nbsp;</th>
-        <td mat-cell
-            *matCellDef="let element">
-            <button mat-icon-button
-                    aria-label="expand row"
-                    (click)="toggle(element); $event.stopPropagation()"
-                    class="example-toggle-button"
-                    [class.example-toggle-button-expanded]="isExpanded(element)">
-                <mat-icon>keyboard_arrow_down</mat-icon>
-            </button>
-        </td>
-    </ng-container>
-
-    <!-- Expanded Content Column - The detail row is made up of this one column that spans across all columns -->
-    <ng-container matColumnDef="expandedDetail">
-        <td mat-cell
-            *matCellDef="let element"
-            [attr.colspan]="columnsToDisplayWithExpand.length">
-            <div class="example-element-detail-wrapper"
-                 [class.example-element-detail-wrapper-expanded]="isExpanded(element)">
-                <div class="example-element-detail">
-                    <div class="example-element-diagram">
-                        <div class="example-element-position">{{element.position}}</div>
-                        <div class="example-element-symbol">{{element.symbol}}</div>
-                        <div class="example-element-name">{{element.name}}</div>
-                        <div class="example-element-weight">{{element.weight}}</div>
-                    </div>
-                    <div class="example-element-description">
-                        {{element.description}}
-                        <span class="example-element-description-attribution"> -- Wikipedia </span>
-                    </div>
-                </div>
-            </div>
-        </td>
-    </ng-container>
-
     <tr mat-header-row
         *matHeaderRowDef="columnsToDisplayWithExpand"></tr>
     <tr mat-row
         *matRowDef="let element; columns: columnsToDisplayWithExpand;"
         class="example-element-row"
-        [class.example-expanded-row]="isExpanded(element)"
-        [style.background]="element.__invalid ? '#ffecec' : null"
-        (click)="toggle(element)">
+        [style.background]="element.__invalid ? '#ffecec' : null">
     </tr>
-    <tr mat-row
-        *matRowDef="let row; columns: ['expandedDetail']"
-        class="example-detail-row"></tr>
 </table>

@@ -6,6 +6,8 @@ import { MatButtonModule } from '@angular/material/button';
 import { SampleInfo } from '../../models/sample-info.model';
 import { MatTableModule } from '@angular/material/table';
 import { MatSnackBarModule } from '@angular/material/snack-bar';
+import { MatChipsModule } from '@angular/material/chips';
+import { MatTooltipModule } from '@angular/material/tooltip';
 import { ExceedanceFractionService } from '../../services/exceedance-fraction/exceedance-fraction.service';
 import { ExposureGroupService } from '../../services/exposure-group/exposure-group.service';
 import { OrganizationService } from '../../services/organization/organization.service';
@@ -24,6 +26,8 @@ import { SnackService } from '../../services/ui/snack.service';
     MatButtonModule,
     MatTableModule,
     MatSnackBarModule,
+    MatChipsModule,
+    MatTooltipModule,
 
   ],
   templateUrl: './data.component.html',
@@ -37,14 +41,39 @@ export class DataComponent {
   private snackBar: SnackService = inject(SnackService)
   private firestore = inject(Firestore)
   private auth = inject(Auth)
+  fileName = signal<string>('');
   // Parsed + validated rows (SampleInfo with validation metadata)
-  excelData: (SampleInfo & { __invalid?: boolean; __errors?: string[] })[] = [];
+  excelData = signal<(SampleInfo & { __invalid?: boolean; __errors?: string[] })[]>([]);
   exceedanceFraction!: number;
   columnsToDisplay = ['SampleNumber', 'SampleDate', 'ExposureGroup', 'TWA'];
-  columnsToDisplayWithExpand = [...this.columnsToDisplay, 'Errors', 'expand'];
+  columnsToDisplayWithExpand = [...this.columnsToDisplay, 'Errors'];
   expandedElement!: SampleInfo | null;
-  invalidCount = signal(0);
+  invalidCount = computed(() => this.excelData().filter(r => r.__invalid).length);
   hasInvalidRows = computed(() => this.invalidCount() > 0);
+  totalCount = computed(() => this.excelData().length);
+  validCount = computed(() => this.excelData().filter(r => !r.__invalid).length);
+  invalidCellCount = computed(() => this.excelData().reduce((acc, r) => acc + ((r.__errors || []).length), 0));
+  errorCounts = computed(() => {
+    const counts: Record<string, number> = { ExposureGroup: 0, TWA: 0, SampleDate: 0 };
+    for (const r of this.excelData()) {
+      for (const e of (r.__errors || [])) {
+        if (e.includes('ExposureGroup')) counts['ExposureGroup']++;
+        else if (e.includes('TWA')) counts['TWA']++;
+        else if (e.includes('SampleDate')) counts['SampleDate']++;
+      }
+    }
+    return counts;
+  });
+  errorTooltip = computed(() => {
+    const c = this.errorCounts();
+    return `ExposureGroup: ${c['ExposureGroup']}, TWA: ${c['TWA']}, SampleDate: ${c['SampleDate']}`;
+  });
+  headerLabels: Record<string, string> = {
+    SampleNumber: 'Sample #',
+    SampleDate: 'Sample Date',
+    ExposureGroup: 'Exposure Group',
+    TWA: 'TWA'
+  };
   isExpanded(element: SampleInfo) {
     return this.expandedElement === element;
   }
@@ -53,6 +82,7 @@ export class DataComponent {
   }
   onFileChange(event: any) {
     const file = event.target.files[0];
+    if (file?.name) this.fileName.set(file.name);
     const fileReader = new FileReader();
     fileReader.onload = (e: any) => {
       const workbook = read(e.target.result, { type: 'binary', cellDates: true });
@@ -105,15 +135,14 @@ export class DataComponent {
       return result;
     });
 
-    this.excelData = parsed;
-    this.invalidCount.set(parsed.filter(r => r.__invalid).length);
+    this.excelData.set(parsed);
   }
 
   calculateExceedanceFraction() {
     //create a variable to separate the ExposureGroup column into an array
     const exposureGroups: {
       [key: string]: SampleInfo[];
-    } = this.exposureGroupservice.separateSampleInfoByExposureGroup(this.excelData as SampleInfo[]);
+    } = this.exposureGroupservice.separateSampleInfoByExposureGroup(this.excelData() as SampleInfo[]);
     //calculate the exceedance fraction for each ExposureGroup
     for (const exposureGroupName in exposureGroups) {
       const exposureGroup = exposureGroups[exposureGroupName];
@@ -126,7 +155,7 @@ export class DataComponent {
     }
 
 
-    const TWAlist: number[] = this.exposureGroupservice.getTWAListFromSampleInfo(this.excelData as SampleInfo[]);
+    const TWAlist: number[] = this.exposureGroupservice.getTWAListFromSampleInfo(this.excelData() as SampleInfo[]);
     this.exceedanceFraction = this.exceedanceFractionservice.calculateExceedanceProbability(TWAlist, 0.05);
   }
 
@@ -159,7 +188,7 @@ export class DataComponent {
       console.warn('Org membership check failed', e);
     }
     // Only save valid rows
-    const validRows = (this.excelData || []).filter(r => !r.__invalid) as SampleInfo[];
+    const validRows = (this.excelData() || []).filter(r => !r.__invalid) as SampleInfo[];
     // Separate into exposure groups and save each group concurrently
     const grouped = this.exposureGroupservice.separateSampleInfoByExposureGroup(validRows);
     // Track recompute: snapshot the time and the doc ids that will be affected
