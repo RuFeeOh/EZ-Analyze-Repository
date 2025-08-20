@@ -19,10 +19,24 @@ jobs:
           channelId: live
           projectId: leadzilla-ce7ab
       - name: Authenticate to Google Cloud (for CLI deploy)
+        if: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_LEADZILLA_CE7AB != '' }}
         uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_LEADZILLA_CE7AB }}
-      - name: Deploy Firestore rules via Firebase CLI
+      - name: Deploy Firestore rules/indexes via Firebase CLI (ADC or Token)
+        env:
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+          FIREBASE_SERVICE_ACCOUNT_LEADZILLA_CE7AB: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_LEADZILLA_CE7AB }}
         run: |
           npm install -g firebase-tools
-          firebase deploy --only firestore:rules,firestore:indexes --project leadzilla-ce7ab
+          if [ -z "${FIREBASE_SERVICE_ACCOUNT_LEADZILLA_CE7AB}" ] && [ -z "${FIREBASE_TOKEN}" ]; then
+            echo "Neither service account JSON nor FIREBASE_TOKEN provided. Add one of them as a secret." >&2
+            exit 1
+          fi
+          if [ -n "${FIREBASE_TOKEN}" ]; then
+            echo "Deploying with FIREBASE_TOKEN"
+            firebase deploy --only firestore:rules,firestore:indexes --project leadzilla-ce7ab --token "$FIREBASE_TOKEN"
+          else
+            echo "Deploying with Application Default Credentials (service account)"
+            firebase deploy --only firestore:rules,firestore:indexes --project leadzilla-ce7ab
+          fi
