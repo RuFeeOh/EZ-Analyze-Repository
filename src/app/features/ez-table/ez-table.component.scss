@@ -31,3 +31,65 @@ tr.detail-row {
 .detail-wrapper.detail-expanded {
     grid-template-rows: 1fr;
 }
+
+/* EF badge styles */
+.ef-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 12px;
+    line-height: 18px;
+    font-weight: 600;
+    color: #0f172a;
+    /* default text color for contrast */
+}
+
+.ef-good {
+    background: #bbf7d0;
+    /* green-200 */
+    color: #065f46;
+    /* green-800 */
+}
+
+.ef-warn {
+    background: #fde68a;
+    /* amber-300 */
+    color: #92400e;
+    /* amber-800 */
+}
+
+.ef-bad {
+    background: #fecaca;
+    /* red-200 */
+    color: #7f1d1d;
+    /* red-800 */
+}
+
+.trend mat-icon {
+    font-size: 20px;
+    height: 20px;
+    width: 20px;
+    vertical-align: middle;
+}
+
+.trend-up mat-icon {
+    color: #dc2626;
+    /* red-600 (up = bad) */
+}
+
+.trend-down mat-icon {
+    color: #16a34a;
+    /* green-600 (down = good) */
+}
+
+.trend-flat mat-icon {
+    color: #6b7280;
+    /* gray-500 */
+}
+
+.trend-delta {
+    margin-left: 4px;
+    font-size: 12px;
+    color: #374151;
+    /* gray-700 */
+}

@@ -35,7 +35,8 @@ export class ExceedanceFractionComponent {
   // Table configuration for ez-table (generic)
   readonly efSummaryColumns = [
     new EzColumn({ Name: 'ExposureGroup', DisplayName: 'Exposure Group' }),
-    new EzColumn({ Name: 'ExceedanceFraction', DisplayName: 'Exceedance Fraction', Format: 'percent' }),
+    new EzColumn({ Name: 'ExceedanceFraction', DisplayName: 'Exceedance Fraction', Format: 'percent-badge' }),
+    new EzColumn({ Name: 'Trend', DisplayName: 'Trend', Format: 'trend' }),
     new EzColumn({ Name: 'DateCalculated', DisplayName: 'Calculation Date', Format: 'date' }),
     new EzColumn({ Name: 'SamplesUsed', DisplayName: 'Samples Used' })
   ];
@@ -54,13 +55,30 @@ export class ExceedanceFractionComponent {
       map(groups => (groups || []).flatMap(g => {
         const name = g?.ExposureGroup ?? g?.Group ?? '';
         const history = (g?.ExceedanceFractionHistory || []) as any[];
-        return history.map((ef, idx) => ({
+        const historyAsc = history.slice().sort((a, b) => new Date(a?.DateCalculated || 0).getTime() - new Date(b?.DateCalculated || 0).getTime());
+        return historyAsc.map((ef, idx) => ({
           Uid: `${name}__${ef?.DateCalculated || 'no-date'}__${idx}`,
           ExposureGroup: name,
           ExceedanceFraction: ef?.ExceedanceFraction ?? 0,
           DateCalculated: ef?.DateCalculated ?? '',
           SamplesUsed: (ef?.ResultsUsed ?? []).length,
           ResultsUsed: ef?.ResultsUsed ?? [],
+          Trend: (() => {
+            if (idx === 0) return 'flat';
+            const prev = historyAsc[idx - 1]?.ExceedanceFraction ?? null;
+            const curr = ef?.ExceedanceFraction ?? null;
+            if (prev == null || curr == null) return 'flat';
+            if (curr > prev) return 'up';
+            if (curr < prev) return 'down';
+            return 'flat';
+          })(),
+          Delta: (() => {
+            if (idx === 0) return 0;
+            const prev = historyAsc[idx - 1]?.ExceedanceFraction ?? null;
+            const curr = ef?.ExceedanceFraction ?? null;
+            if (prev == null || curr == null) return 0;
+            return (curr - prev);
+          })(),
         }));
       }).sort((a, b) => new Date(b?.DateCalculated || 0).getTime() - new Date(a?.DateCalculated || 0).getTime()))
     );
@@ -76,6 +94,19 @@ export class ExceedanceFractionComponent {
         if (!latest) {
           latest = g?.LatestExceedanceFraction;
         }
+        // Determine trend against immediate previous when available
+        let trend: 'up' | 'down' | 'flat' = 'flat';
+        let delta = 0;
+        if (history?.length >= 2) {
+          const sorted = history.slice().sort((a, b) => new Date(b?.DateCalculated || 0).getTime() - new Date(a?.DateCalculated || 0).getTime());
+          const curr = sorted[0]?.ExceedanceFraction ?? null;
+          const prev = sorted[1]?.ExceedanceFraction ?? null;
+          if (curr != null && prev != null) {
+            if (curr > prev) trend = 'up';
+            else if (curr < prev) trend = 'down';
+            delta = (curr - prev);
+          }
+        }
         return {
           Uid: `${name}__latest__${latest?.DateCalculated || 'no-date'}`,
           ExposureGroup: name,
@@ -83,6 +114,8 @@ export class ExceedanceFractionComponent {
           DateCalculated: latest?.DateCalculated ?? '',
           SamplesUsed: (latest?.ResultsUsed ?? []).length,
           ResultsUsed: latest?.ResultsUsed ?? [],
+          Trend: trend,
+          Delta: delta,
         };
       }).sort((a, b) => new Date(b?.DateCalculated || 0).getTime() - new Date(a?.DateCalculated || 0).getTime()))
     );

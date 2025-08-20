@@ -240,6 +240,15 @@ export class EzTableComponent implements AfterViewInit {
     return typeof col === 'string' ? col : (col.DisplayName || col.Name);
   }
 
+  // Format helpers used by the template
+  isPercentBadge(col: string | EzColumn): boolean {
+    return typeof col !== 'string' && (col?.Format === 'percent-badge');
+  }
+
+  isTrend(col: string | EzColumn): boolean {
+    return typeof col !== 'string' && (col?.Format === 'trend');
+  }
+
   // Resolve values for summary/detail cells
   valueFor(item: any, col: string | EzColumn, section: 'summary' | 'detail'): any {
     const key = this.columnId(col);

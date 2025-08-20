@@ -32,7 +32,44 @@
             *matHeaderCellDef
             [mat-sort-header]="columnId(column)">{{ columnHeader(column) }}</th>
         <td mat-cell
-            *matCellDef="let item">{{ valueFor(item, column, 'summary') | ezFormat: column }}</td>
+            *matCellDef="let item">
+            @if (isPercentBadge(column)) {
+            @let raw = valueFor(item, column, 'summary');
+            @let val = (raw ?? 0);
+            <span class="ef-badge"
+                  [class.ef-good]="val < 0.05"
+                  [class.ef-warn]="val >= 0.05 && val < 0.1"
+                  [class.ef-bad]="val >= 0.1">
+                {{ val | ezFormat: { Name: columnId(column), Format: 'percent' } }}
+            </span>
+            } @else if (isTrend(column)) {
+            @let t = valueFor(item, column, 'summary');
+            @let delta = (item?.Delta ?? 0);
+            <span class="trend"
+                  [class.trend-up]="t === 'up'"
+                  [class.trend-down]="t === 'down'"
+                  [class.trend-flat]="t !== 'up' && t !== 'down'">
+                <mat-icon inline>
+                    {{ t === 'up' ? 'arrow_upward' : (t === 'down' ? 'arrow_downward' : 'horizontal_rule') }}
+                </mat-icon>
+                <span class="trend-delta">{{ (delta < 0
+                      ?
+                      -delta
+                      :
+                      delta)
+                      |
+                      ezFormat:
+                      {
+                      Name: 'Delta'
+                      ,
+                      Format: 'percent'
+                      }
+                      }}</span>
+                </span>
+                } @else {
+                {{ valueFor(item, column, 'summary') | ezFormat: column }}
+                }
+        </td>
     </ng-container>
     }
 
