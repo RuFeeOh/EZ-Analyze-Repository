@@ -57,4 +57,8 @@ jobs:
         env:
           FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
         run: |
-          firebase deploy --project leadzilla-ce7ab --only functions,firestore:rules,firestore:indexes,hosting
+          if [ -z "${FIREBASE_TOKEN}" ]; then
+            echo "FIREBASE_TOKEN is not set. Add it in GitHub repo settings > Secrets and variables > Actions." >&2
+            exit 1
+          fi
+          firebase deploy --token "$FIREBASE_TOKEN" --project leadzilla-ce7ab --only functions,firestore:rules,firestore:indexes,hosting
