@@ -1,0 +1,8 @@
+<div class="snack-wrap">
+    <div class="label">{{ data.label }}</div>
+    <div class="numbers">
+        {{ (data.progress$ | async)?.done || 0 }} / {{ (data.progress$ | async)?.total || 0 }}
+    </div>
+    <mat-progress-bar mode="determinate"
+                      [value]="((data.progress$ | async)?.done || 0) * 100 / (((data.progress$ | async)?.total || 1))"></mat-progress-bar>
+</div>

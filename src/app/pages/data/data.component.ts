@@ -17,6 +17,7 @@ import { Auth } from '@angular/fire/auth';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { EfRecomputeTrackerService } from '../../services/exceedance-fraction/ef-recompute-tracker.service';
 import { SnackService } from '../../services/ui/snack.service';
+import { BehaviorSubject } from 'rxjs';
 
 @Component({
   selector: 'app-data',
@@ -196,7 +197,15 @@ export class DataComponent {
     const ids = Object.keys(grouped).map(name => this.slugify(name));
     // Show progress snackbar
     const total = ids.length;
-    let snackRef = this.snackBar.open(total > 0 ? `Recomputing EF… 0/${total}` : 'Saving…', undefined, { verticalPosition: "top" });
+    // Use a persistent progress snackbar to avoid flashing on every tick
+    let snackRef: any = null;
+    const progress$ = new BehaviorSubject<{ done: number; total: number }>({ done: 0, total });
+    if (total > 0) {
+      const { ProgressSnackComponent } = await import('../../shared/progress-snack/progress-snack.component');
+      snackRef = this.snackBar.openFromComponent(ProgressSnackComponent, { data: { label: 'Recomputing EF…', progress$ } });
+    } else {
+      snackRef = this.snackBar.open('Saving…');
+    }
     try {
       await this.exposureGroupservice.saveGroupedSampleInfo(grouped, currentOrg.Uid, currentOrg.Name);
       // If there are no groups to recompute, finish early
@@ -210,20 +219,19 @@ export class DataComponent {
         ids,
         startIso,
         (done, totalCount) => {
-          // Update snackbar message on progress
-          snackRef.dismiss();
-          snackRef = this.snackBar.open(`Recomputing EF… ${done}/${totalCount}`, undefined, { verticalPosition: "top" });
+          // Update progress subject; the snack component renders without reopening
+          try { progress$.next({ done, total: totalCount }); } catch { }
         },
         60000
       );
-      snackRef.dismiss();
+      try { snackRef?.dismiss(); } catch { }
       if (res.timedOut) {
         this.snackBar.open('EF recompute is taking longer than expected. Values will appear when ready.', 'Dismiss', { duration: 5000 });
       } else {
         this.snackBar.open('EF recompute complete.', 'OK', { duration: 3000 });
       }
     } catch (e) {
-      snackRef.dismiss();
+      try { snackRef?.dismiss(); } catch { }
       this.snackBar.open('Save failed. Please try again.', 'Dismiss', { duration: 5000 });
       throw e;
     }
