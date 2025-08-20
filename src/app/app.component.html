@@ -1,31 +1,27 @@
-<mat-drawer-container class="example-container">
-   <mat-drawer mode="side"
-               opened>
+<mat-toolbar color="primary" class="app-toolbar">
+   <span class="app-title">EZ Analyze</span>
+   <span class="spacer"></span>
+   <span class="org-chip" *ngIf="organizationService.currentOrg?.Name as orgName">{{ orgName }}</span>
+   <ng-container *ngIf="user$ | async as u; else loginBtn">
+      <button mat-button (click)="logout()">Logout</button>
+   </ng-container>
+   <ng-template #loginBtn>
+      <button mat-flat-button color="accent" (click)="login()">Login</button>
+   </ng-template>
+</mat-toolbar>
 
+<mat-drawer-container class="app-container">
+   <mat-drawer mode="side" opened class="app-sidenav">
       <mat-nav-list>
-         currentOrg: {{organizationService.currentOrg?.Name}}
-         <app-login></app-login>
-         <a mat-list-item
-            routerLink="/org"
-            routerLinkActive="mdc-list-item--activated">Org</a>
-         <a mat-list-item
-            *ngIf="organizationService.currentOrg?.Name"
-            routerLink="/data"
-            routerLinkActive="mdc-list-item--activated">Data</a>
-         <a mat-list-item
-            *ngIf="organizationService.currentOrg?.Name"
-            routerLink="/exceedance-fraction"
-            routerLinkActive="mdc-list-item--activated">
-            Exceedance Fractions
-         </a>
-         <a mat-list-item
-            *ngIf="organizationService.currentOrg?.Name"
-            routerLink="/exposure-groups"
-            routerLinkActive="mdc-list-item--activated">
-            Exposure Groups
-         </a>
+         <a mat-list-item routerLink="/org" routerLinkActive="mdc-list-item--activated">Org</a>
+         <a mat-list-item *ngIf="organizationService.currentOrg?.Name" routerLink="/data" routerLinkActive="mdc-list-item--activated">Data</a>
+         <a mat-list-item *ngIf="organizationService.currentOrg?.Name" routerLink="/exceedance-fraction" routerLinkActive="mdc-list-item--activated">Exceedance Fractions</a>
+         <a mat-list-item *ngIf="organizationService.currentOrg?.Name" routerLink="/exposure-groups" routerLinkActive="mdc-list-item--activated">Exposure Groups</a>
       </mat-nav-list>
    </mat-drawer>
-   <mat-drawer-content><router-outlet /></mat-drawer-content>
-
+   <mat-drawer-content>
+      <div class="content">
+         <router-outlet />
+      </div>
+   </mat-drawer-content>
 </mat-drawer-container>

@@ -1,15 +1,40 @@
-.example-container {
-    width: auto;
-    height: 100%;
-    /* The background property is added to clearly distinguish the borders between drawer and main
-       content */
+:host {
+    display: block;
+    height: 100vh;
 }
 
-
-mat-drawer {
-    padding: 10px;
+.app-toolbar {
+    position: sticky;
+    top: 0;
+    z-index: 1000;
+    padding: 0 16px;
 }
 
-mat-drawer-content {
-    padding: 20px;
+.app-title {
+    font-weight: 600;
+    margin-left: 4px;
+}
+
+.spacer {
+    flex: 1 1 auto;
+}
+
+.org-chip {
+    margin-right: 8px;
+    opacity: 0.9;
+}
+
+.app-container {
+    height: calc(100vh - 64px);
+}
+
+.app-sidenav {
+    width: 260px;
+    padding: 8px 0;
+}
+
+.content {
+    padding: 16px 24px;
+    max-width: 1280px;
+    margin: 0 auto;
 }
