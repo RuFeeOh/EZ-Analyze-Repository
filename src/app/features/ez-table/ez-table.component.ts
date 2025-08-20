@@ -45,7 +45,7 @@ export class EzTableComponent implements AfterViewInit {
   defaultSortActive = input<string | null>(null);
   defaultSortDirection = input<'asc' | 'desc'>('asc');
   // Paginator config
-  pageSize = input<number>(5);
+  pageSize = input<number>(10);
   pageSizeOptions = input<number[]>([5, 10, 25, 50]);
 
   // Deprecated/back-compat inputs (will be removed when callers migrate)
