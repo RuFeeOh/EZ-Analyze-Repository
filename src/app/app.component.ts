@@ -1,4 +1,5 @@
 import { Component, inject } from '@angular/core';
+import { HttpClientModule } from '@angular/common/http';
 import { RouterOutlet, RouterLink, RouterLinkActive } from '@angular/router';
 import { MatButtonModule } from '@angular/material/button';
 import { MatSidenavModule } from '@angular/material/sidenav';
@@ -16,6 +17,7 @@ import { Router } from '@angular/router';
   selector: 'app-root',
   imports: [
     CommonModule,
+    HttpClientModule,
     RouterOutlet,
     RouterLink,
     RouterLinkActive,
@@ -25,7 +27,7 @@ import { Router } from '@angular/router';
     MatToolbarModule,
     MatIconModule,
     MatMenuModule,
-  OrganizationCircleComponent,
+    OrganizationCircleComponent,
   ],
   templateUrl: './app.component.html',
   styleUrl: './app.component.scss'

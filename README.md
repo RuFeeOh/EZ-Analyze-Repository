@@ -92,7 +92,15 @@ Angular CLI does not come with an end-to-end testing framework by default. You c
 For more information on using the Angular CLI, including detailed command references, visit the [Angular CLI Overview and Command Reference](https://angular.dev/tools/cli) page.
 
 
+## Monetization
 
+Using Stripe's recurring payment process there will be a tiered payment process
+
+| **Free**  | 1 user - 20 exposure groups Small teams/testing | **$0**
+| **Professional**  | 5 users - 200 exposure groups  | **$199–$299**    
+| **Enterprise**    | - Unlimited users/exposure groups  | **$600+**
+
+Users will automatically be part of the free tier. In order to share an organization to 1-4 people the user will have to subscribe using Stripe. In order for a user to have more than 20 exposure groups, the user will have to subscribe using Stripe. If the user does not subscribe then the data will not be saved or the user cannot share. Once the user reaches the threshole for 200 exposure groups or is trying to share to more than 4 people then the user will have to subscribe to a higher tier using stripe.
 
 
 
@@ -103,3 +111,36 @@ For more information on using the Angular CLI, including detailed command refere
 20+%
 
 Gameify these ranges to help learn how the plants are faring
+
+### Stripe setup (subscriptions)
+
+1) Create a Stripe account (test mode is fine) and add Products/Prices for your tiers (e.g., price IDs like `price_PROFESSIONAL`, `price_ENTERPRISE`).
+
+2) Create API keys and webhook secret
+	 - Get your Secret key (Developers > API keys > Secret key) and store as Firebase env var:
+		 - `firebase functions:config:set stripe.secret_key="sk_test_..."`
+	 - Create a webhook endpoint for your project (Developers > Webhooks) with events:
+		 - `customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted`
+		 - Set URL to your deployed function (e.g., `https://<region>-<project>.cloudfunctions.net/stripeWebhook`). For local emulators see below.
+	 - Save the webhook signing secret and set it:
+		 - `firebase functions:config:set stripe.webhook_secret="whsec_..."`
+
+3) Deploy functions and hosting
+	 - `npm --prefix functions ci && npm --prefix functions run build`
+	 - `firebase deploy --only functions,hosting`
+
+4) Local development with emulators
+	 - Start emulators + Angular app:
+		 - `npm start`
+	 - Use Stripe CLI to forward webhooks to emulator:
+		 - `stripe listen --forward-to localhost:5001/<project-id>/us-central1/stripeWebhook`
+	 - Export the signing secret to your functions env for local runs, or pass it via `.env`.
+
+5) Frontend wiring
+	 - Open `/billing` route in the app to subscribe or manage billing.
+	 - Replace placeholder price IDs in `BillingComponent` with your real `price_...` IDs.
+	 - In a real app, map Firebase Auth users to Stripe customers and store `customerId` under `/billing/customers/{uid}`. The sample writes subscription status to `/billing/customers/{customerId}` from the webhook.
+
+Notes
+ - API endpoints are exposed under `/api/*` via Firebase Hosting rewrites.
+ - The Cloud Function `stripeWebhook` updates Firestore with subscription status. Use this to gate features (e.g., saving beyond free tier or sharing).

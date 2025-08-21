@@ -45,6 +45,18 @@
     ],
     "rewrites": [
       {
+        "source": "/api/createCheckoutSession",
+        "function": "createCheckoutSession"
+      },
+      {
+        "source": "/api/createPortalSession",
+        "function": "createPortalSession"
+      },
+      {
+        "source": "/api/stripeWebhook",
+        "function": "stripeWebhook"
+      },
+      {
         "source": "**",
         "destination": "/index.html"
       }
