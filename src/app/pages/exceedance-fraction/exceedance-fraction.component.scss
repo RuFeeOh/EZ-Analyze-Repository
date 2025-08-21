@@ -1,0 +1,25 @@
+/* Reuse badge palette for legend (same class names as ez-table) */
+.ef-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 12px;
+    line-height: 18px;
+    font-weight: 600;
+    color: #0f172a;
+}
+
+.ef-good {
+    background: #bbf7d0;
+    color: #065f46;
+}
+
+.ef-warn {
+    background: #fde68a;
+    color: #92400e;
+}
+
+.ef-bad {
+    background: #fecaca;
+    color: #7f1d1d;
+}

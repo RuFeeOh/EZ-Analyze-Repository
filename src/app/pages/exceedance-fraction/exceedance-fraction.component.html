@@ -11,6 +11,19 @@
            style="flex:1; max-width:320px; padding:6px 10px; border:1px solid #ccc; border-radius:4px;" />
 </div>
 
+<div class="ef-legend"
+     style="display:flex; align-items:center; gap:12px; margin: 4px 0 8px 0; font-size: 12px;">
+    <span>Legend:</span>
+    <span class="ef-badge ef-good">&lt; 5%</span>
+    <span class="ef-badge ef-warn">5% – 20%</span>
+    <span class="ef-badge ef-bad">≥ 20%</span>
+    <span style="opacity:0.7;">(lower is better)</span>
+    <span style="opacity:0.7;">Trend: <mat-icon inline
+                  style="vertical-align: middle; color:#dc2626;">arrow_upward</mat-icon> bad, <mat-icon inline
+                  style="vertical-align: middle; color:#16a34a;">arrow_downward</mat-icon> good</span>
+
+</div>
+
 <ez-table [items]="(showLatest() ? (latestEfItems$ | async) : (efItems$ | async)) ?? []"
           [summaryColumns]="efSummaryColumns"
           [detailColumns]="efDetailColumns"

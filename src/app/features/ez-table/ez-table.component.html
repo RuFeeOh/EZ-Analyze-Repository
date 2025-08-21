@@ -38,8 +38,8 @@
             @let val = (raw ?? 0);
             <span class="ef-badge"
                   [class.ef-good]="val < 0.05"
-                  [class.ef-warn]="val >= 0.05 && val < 0.1"
-                  [class.ef-bad]="val >= 0.1">
+                  [class.ef-warn]="val >= 0.05 && val < 0.2"
+                  [class.ef-bad]="val >= 0.2">
                 {{ val | ezFormat: { Name: columnId(column), Format: 'percent' } }}
             </span>
             } @else if (isTrend(column)) {
