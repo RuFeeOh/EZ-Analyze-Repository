@@ -7,6 +7,7 @@ import { ExposureGroup } from '../../models/exposure-group.model';
 import { SampleInfo } from '../../models/sample-info.model';
 import { ExposureGroupTableItem } from '../../models/exposure-group-table-item.model';
 import { MatIconModule } from '@angular/material/icon';
+import { MatTooltipModule } from '@angular/material/tooltip';
 import { MatButtonModule } from '@angular/material/button';
 import { EzColumn } from '../../models/ez-column.model';
 import { EzFormatPipe } from '../../pipes/ez-format.pipe';
@@ -20,6 +21,7 @@ import { LiveAnnouncer } from '@angular/cdk/a11y';
     MatPaginatorModule,
     MatSortModule,
     MatIconModule,
+    MatTooltipModule,
     MatButtonModule,
     EzFormatPipe,
   ],

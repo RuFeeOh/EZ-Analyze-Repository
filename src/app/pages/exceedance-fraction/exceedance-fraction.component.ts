@@ -63,6 +63,8 @@ export class ExceedanceFractionComponent {
           DateCalculated: ef?.DateCalculated ?? '',
           SamplesUsed: (ef?.ResultsUsed ?? []).length,
           ResultsUsed: ef?.ResultsUsed ?? [],
+          PrevExceedanceFraction: (idx > 0 ? historyAsc[idx - 1]?.ExceedanceFraction ?? null : null),
+          PrevDateCalculated: (idx > 0 ? historyAsc[idx - 1]?.DateCalculated ?? '' : ''),
           Trend: (() => {
             if (idx === 0) return 'flat';
             const prev = historyAsc[idx - 1]?.ExceedanceFraction ?? null;
@@ -116,6 +118,8 @@ export class ExceedanceFractionComponent {
           ResultsUsed: latest?.ResultsUsed ?? [],
           Trend: trend,
           Delta: delta,
+          PrevExceedanceFraction: (history?.length >= 2 ? (history.slice().sort((a, b) => new Date(b?.DateCalculated || 0).getTime() - new Date(a?.DateCalculated || 0).getTime())[1]?.ExceedanceFraction ?? null) : null),
+          PrevDateCalculated: (history?.length >= 2 ? (history.slice().sort((a, b) => new Date(b?.DateCalculated || 0).getTime() - new Date(a?.DateCalculated || 0).getTime())[1]?.DateCalculated ?? '') : ''),
         };
       }).sort((a, b) => new Date(b?.DateCalculated || 0).getTime() - new Date(a?.DateCalculated || 0).getTime()))
     );

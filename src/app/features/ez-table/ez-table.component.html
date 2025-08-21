@@ -45,30 +45,53 @@
             } @else if (isTrend(column)) {
             @let t = valueFor(item, column, 'summary');
             @let delta = (item?.Delta ?? 0);
-            <span class="trend"
+            @let deltaAbs = (delta < 0
+              ?
+              -delta
+              :
+              delta);
+              @let
+              sign=(delta> 0 ? '+' : (delta < 0
+                  ? '−'
+                  : ''
+                  ));
+                  @let
+                  prev=(item?.PrevExceedanceFraction
+                  ??
+                  null);
+                  @let
+                  prevDate=(item?.PrevDateCalculated
+                  ?? ''
+                  );
+                  @let
+                  curr=(item?.ExceedanceFraction
+                  ??
+                  null);
+                  <span
+                  class="trend"
                   [class.trend-up]="t === 'up'"
                   [class.trend-down]="t === 'down'"
-                  [class.trend-flat]="t !== 'up' && t !== 'down'">
-                <mat-icon inline>
-                    {{ t === 'up' ? 'arrow_upward' : (t === 'down' ? 'arrow_downward' : 'horizontal_rule') }}
-                </mat-icon>
-                <span class="trend-delta">{{ (delta < 0
-                      ?
-                      -delta
-                      :
-                      delta)
-                      |
-                      ezFormat:
-                      {
-                      Name: 'Delta'
-                      ,
-                      Format: 'percent'
-                      }
-                      }}</span>
-                </span>
-                } @else {
-                {{ valueFor(item, column, 'summary') | ezFormat: column }}
-                }
+                  [class.trend-flat]="t !== 'up' && t !== 'down'"
+                                    [matTooltip]="(prev != null && curr != null)
+                                        ? ('From ' + (prev | ezFormat: { Name: 'Prev', Format: 'percent' })
+                                                + ' on ' + (prevDate | ezFormat: { Name: 'DateCalculated', Format: 'date' })
+                                                + ' to ' + (curr | ezFormat: { Name: 'Curr', Format: 'percent' })
+                                                + ' (' + sign + (deltaAbs | ezFormat: { Name: 'Delta', Format: 'percent' }) + ')')
+                                        : 'No previous value'"
+                                    [attr.aria-label]="(prev != null && curr != null)
+                                        ? ('From ' + (prev | ezFormat: { Name: 'Prev', Format: 'percent' })
+                                                + ' on ' + (prevDate | ezFormat: { Name: 'DateCalculated', Format: 'date' })
+                                                + ' to ' + (curr | ezFormat: { Name: 'Curr', Format: 'percent' })
+                                                + ' (' + sign + (deltaAbs | ezFormat: { Name: 'Delta', Format: 'percent' }) + ')')
+                                        : 'No previous value'">
+                    <mat-icon inline>
+                        {{ t === 'up' ? 'arrow_upward' : (t === 'down' ? 'arrow_downward' : 'horizontal_rule') }}
+                    </mat-icon>
+                    <span class="trend-delta">{{ sign }}{{ deltaAbs | ezFormat: { Name: 'Delta', Format: 'percent' } }}</span>
+                    </span>
+                    } @else {
+                    {{ valueFor(item, column, 'summary') | ezFormat: column }}
+                    }
         </td>
     </ng-container>
     }
