@@ -38,6 +38,8 @@ export class AgentsComponent {
     expandedKey = signal<string | null>(null);
     rowKey = (a: AgentView) => a?.Name?.toLowerCase() || '';
     isExpanded = (a: AgentView) => this.expandedKey() === this.rowKey(a);
+    // Row predicate for MatTable detail row (signature: (index, row) => boolean)
+    rowIsExpanded = (_index: number, row: AgentView) => this.isExpanded(row);
     toggle(a: AgentView) {
         const k = this.rowKey(a);
         this.expandedKey.set(this.expandedKey() === k ? null : k);

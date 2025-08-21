@@ -63,18 +63,24 @@
         *matHeaderRowDef="displayedColumns"></tr>
     <tr mat-row
         *matRowDef="let row; columns: displayedColumns;"></tr>
+    <ng-container matColumnDef="expandedDetail">
+        <td mat-cell
+            *matCellDef="let a"
+            [attr.colspan]="displayedColumns.length">
+            <div class="detail-row-content"
+                 *ngIf="isExpanded(a)">
+                <div style="padding:8px 16px; opacity:0.9;">
+                    <div style="font-size:12px; margin-bottom:4px;">Exposure Groups using this agent:</div>
+                    <ul style="margin:0; padding-left: 16px;">
+                        <li *ngFor="let g of a.Groups">{{ g }}</li>
+                    </ul>
+                </div>
+            </div>
+        </td>
+    </ng-container>
     <tr mat-row
-        *matRowDef="let row; columns: ['expandedDetail']; when: isExpanded"
+        *matRowDef="let row; columns: ['expandedDetail'];"
         class="detail-row"></tr>
 </table>
 
-<!-- Expanded detail row -->
-<ng-template #detail
-             let-groups>
-    <div style="padding:8px 16px; opacity:0.9;">
-        <div style="font-size:12px; margin-bottom:4px;">Exposure Groups using this agent:</div>
-        <ul style="margin:0; padding-left: 16px;">
-            <li *ngFor="let g of groups">{{ g }}</li>
-        </ul>
-    </div>
-</ng-template>
+<!-- end expanded detail template -->
