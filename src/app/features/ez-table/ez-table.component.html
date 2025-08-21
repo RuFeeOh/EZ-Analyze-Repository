@@ -72,13 +72,13 @@
                   [class.trend-up]="t === 'up'"
                   [class.trend-down]="t === 'down'"
                   [class.trend-flat]="t !== 'up' && t !== 'down'"
-                                    [matTooltip]="(prev != null && curr != null)
+                  [matTooltip]="(prev != null && curr != null)
                                         ? ('From ' + (prev | ezFormat: { Name: 'Prev', Format: 'percent' })
                                                 + ' on ' + (prevDate | ezFormat: { Name: 'DateCalculated', Format: 'date' })
                                                 + ' to ' + (curr | ezFormat: { Name: 'Curr', Format: 'percent' })
                                                 + ' (' + sign + (deltaAbs | ezFormat: { Name: 'Delta', Format: 'percent' }) + ')')
                                         : 'No previous value'"
-                                    [attr.aria-label]="(prev != null && curr != null)
+                  [attr.aria-label]="(prev != null && curr != null)
                                         ? ('From ' + (prev | ezFormat: { Name: 'Prev', Format: 'percent' })
                                                 + ' on ' + (prevDate | ezFormat: { Name: 'DateCalculated', Format: 'date' })
                                                 + ' to ' + (curr | ezFormat: { Name: 'Curr', Format: 'percent' })

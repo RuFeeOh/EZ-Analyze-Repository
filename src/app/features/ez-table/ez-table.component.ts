@@ -264,6 +264,15 @@ export class EzTableComponent implements AfterViewInit {
       }
       return item?.Results?.length ?? 0;
     }
+    if (key === 'ResultsTotalCount') {
+      const total = item?.ResultsTotalCount;
+      if (typeof total === 'number') return total;
+      // Fallbacks for older data
+      const legacy = item?.Results?.length;
+      if (typeof legacy === 'number') return legacy;
+      const latestUsed = item?.LatestResultsUsed?.length ?? item?.LatestExceedanceFraction?.ResultsUsed?.length;
+      return latestUsed ?? 0;
+    }
     if (key === 'LatestEF') {
       const nested = item?.LatestExceedanceFraction?.ExceedanceFraction;
       return nested ?? item?.LatestEF ?? 0;

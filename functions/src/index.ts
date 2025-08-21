@@ -130,3 +130,20 @@ export const recomputeExceedanceFraction = onDocumentWritten("organizations/{org
 
     logger.info(`Recomputed EF for organizations/${event.params.orgId}/exposureGroups/${docId}`);
 });
+
+// Maintain a total count of results on the parent doc using subcollection writes
+export const maintainResultsTotalCount = onDocumentWritten("organizations/{orgId}/exposureGroups/{groupId}/results/{resultId}", async (event: any) => {
+    const orgId = event.params.orgId as string;
+    const groupId = event.params.groupId as string;
+    const beforeExists = !!event.data?.before?.exists;
+    const afterExists = !!event.data?.after?.exists;
+    if (beforeExists === afterExists) {
+        // Pure update, no net count change
+        return;
+    }
+    const db = admin.firestore();
+    const parentRef = db.doc(`organizations/${orgId}/exposureGroups/${groupId}`);
+    const delta = (!beforeExists && afterExists) ? 1 : -1;
+    await parentRef.set({ ResultsTotalCount: admin.firestore.FieldValue.increment(delta) }, { merge: true });
+    logger.info(`ResultsTotalCount ${delta > 0 ? '++' : '--'} for org ${orgId} group ${groupId}`);
+});

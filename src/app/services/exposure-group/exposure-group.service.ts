@@ -154,15 +154,10 @@ export class ExposureGroupService {
         if (sample.TWA && +sample.TWA > 0) {
           TWAlist.push(+sample.TWA)
         } else if (+sample.TWA === 0) {
-          // throw new Error('Data contains zeros')
           doesSampleInfoContainZero = true;
         }
 
       });
-
-    if (doesSampleInfoContainZero) {
-      alert('Data contains zeros');
-    }
     return TWAlist;
   }
 
