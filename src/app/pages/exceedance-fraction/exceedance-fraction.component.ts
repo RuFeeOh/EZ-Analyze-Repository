@@ -37,6 +37,8 @@ export class ExceedanceFractionComponent {
     new EzColumn({ Name: 'ExposureGroup', DisplayName: 'Exposure Group' }),
     new EzColumn({ Name: 'ExceedanceFraction', DisplayName: 'Exceedance Fraction', Format: 'percent-badge' }),
     new EzColumn({ Name: 'Trend', DisplayName: 'Trend', Format: 'trend' }),
+    new EzColumn({ Name: 'Agent', DisplayName: 'Agent' }),
+    new EzColumn({ Name: 'OELNumber', DisplayName: 'OEL' }),
     new EzColumn({ Name: 'DateCalculated', DisplayName: 'Calculation Date', Format: 'date' }),
     new EzColumn({ Name: 'SamplesUsed', DisplayName: 'Samples Used' })
   ];
@@ -59,6 +61,15 @@ export class ExceedanceFractionComponent {
         return historyAsc.map((ef, idx) => ({
           Uid: `${name}__${ef?.DateCalculated || 'no-date'}__${idx}`,
           ExposureGroup: name,
+          Agent: (() => {
+            const results = ef?.ResultsUsed ?? [];
+            if (Array.isArray(results) && results.length) {
+              const first = results.find((r: any) => !!r?.Agent)?.Agent;
+              return first ?? '';
+            }
+            return '';
+          })(),
+          OELNumber: ef?.OELNumber ?? (g?.LatestExceedanceFraction?.OELNumber ?? null),
           ExceedanceFraction: ef?.ExceedanceFraction ?? 0,
           DateCalculated: ef?.DateCalculated ?? '',
           SamplesUsed: (ef?.ResultsUsed ?? []).length,
@@ -112,6 +123,15 @@ export class ExceedanceFractionComponent {
         return {
           Uid: `${name}__latest__${latest?.DateCalculated || 'no-date'}`,
           ExposureGroup: name,
+          Agent: (() => {
+            const results = latest?.ResultsUsed ?? [];
+            if (Array.isArray(results) && results.length) {
+              const first = results.find((r: any) => !!r?.Agent)?.Agent;
+              return first ?? '';
+            }
+            return '';
+          })(),
+          OELNumber: latest?.OELNumber ?? (g?.LatestExceedanceFraction?.OELNumber ?? null),
           ExceedanceFraction: latest?.ExceedanceFraction ?? 0,
           DateCalculated: latest?.DateCalculated ?? '',
           SamplesUsed: (latest?.ResultsUsed ?? []).length,
