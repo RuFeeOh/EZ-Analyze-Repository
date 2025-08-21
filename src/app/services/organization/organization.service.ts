@@ -1,8 +1,8 @@
-import { computed, inject, Injectable, OnInit, Signal } from '@angular/core';
+import { computed, inject, Injectable, OnInit, Signal, EnvironmentInjector, runInInjectionContext } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { collectionData } from '@angular/fire/firestore';
 import { collection, addDoc, where, query, doc, deleteDoc, setDoc } from 'firebase/firestore';
-import { catchError, map, Observable, of, switchMap } from 'rxjs';
+import { catchError, map, Observable, of, switchMap, defer } from 'rxjs';
 import { Firestore } from '@angular/fire/firestore'
 import { Auth, user } from '@angular/fire/auth';
 import { Organization } from '../../models/organization.model';
@@ -13,6 +13,7 @@ import { Organization } from '../../models/organization.model';
 export class OrganizationService {
   private firestore = inject(Firestore);
   private auth = inject(Auth);
+  private env = inject(EnvironmentInjector);
   currentOrg: Organization | null = null;
   user$ = user(this.auth);
   private user = toSignal(this.user$, { initialValue: null });
@@ -20,7 +21,7 @@ export class OrganizationService {
     return this.auth.currentUser?.uid;
   }
   private organizationList$ = this.user$.pipe(
-    switchMap(user => user ? this.getOrganizationList() : of([]))
+    switchMap(user => user ? this.getOrganizationList(user.uid ?? '') : of([]))
   )
   organizationList: Signal<any[]> = toSignal(this.organizationList$, { initialValue: [] })
 
@@ -35,11 +36,15 @@ export class OrganizationService {
     }
   }
 
-  private getOrganizationList(): Observable<Organization[]> {
+  private getOrganizationList(uid: string): Observable<Organization[]> {
     const organizationCollection = collection(this.firestore, 'organizations');
-    const userOrganizations = query(organizationCollection, where('UserUids', 'array-contains', this.userUid));
+    const userOrganizations = query(organizationCollection, where('UserUids', 'array-contains', uid));
 
-    const organizations$ = collectionData(userOrganizations, { idField: 'Uid' });
+    // Ensure Angular injection/zone context when creating the Firebase observable
+    const organizations$ = defer(() =>
+      runInInjectionContext(this.env, () => collectionData(userOrganizations as any, { idField: 'Uid' }))
+    );
+
     return organizations$.pipe(
       map((docs) => docs.map((doc) => doc as Organization)),
       catchError((error) => {
