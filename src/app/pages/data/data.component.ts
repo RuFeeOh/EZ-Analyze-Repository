@@ -6,6 +6,7 @@ import { MatButtonModule } from '@angular/material/button';
 import { SampleInfo } from '../../models/sample-info.model';
 import { MatTableModule } from '@angular/material/table';
 import { MatSnackBarModule } from '@angular/material/snack-bar';
+import { MatDialog, MatDialogModule } from '@angular/material/dialog';
 import { MatChipsModule } from '@angular/material/chips';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { ExceedanceFractionService } from '../../services/exceedance-fraction/exceedance-fraction.service';
@@ -17,7 +18,9 @@ import { Auth } from '@angular/fire/auth';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { EfRecomputeTrackerService } from '../../services/exceedance-fraction/ef-recompute-tracker.service';
 import { SnackService } from '../../services/ui/snack.service';
-import { BehaviorSubject } from 'rxjs';
+import { BehaviorSubject, firstValueFrom } from 'rxjs';
+import { AgentsDialogComponent } from './agents-dialog/agents-dialog.component';
+import { AgentService } from '../../services/agent/agent.service';
 
 @Component({
   selector: 'app-data',
@@ -29,6 +32,7 @@ import { BehaviorSubject } from 'rxjs';
     MatSnackBarModule,
     MatChipsModule,
     MatTooltipModule,
+    MatDialogModule,
 
   ],
   templateUrl: './data.component.html',
@@ -42,6 +46,8 @@ export class DataComponent {
   private snackBar: SnackService = inject(SnackService)
   private firestore = inject(Firestore)
   private auth = inject(Auth)
+  private dialog = inject(MatDialog)
+  private agentService = inject(AgentService)
   fileName = signal<string>('');
   // Parsed + validated rows (SampleInfo with validation metadata)
   excelData = signal<(SampleInfo & { __invalid?: boolean; __errors?: string[] })[]>([]);
@@ -190,6 +196,33 @@ export class DataComponent {
     }
     // Only save valid rows
     const validRows = (this.excelData() || []).filter(r => !r.__invalid) as SampleInfo[];
+    // Gather unique agents and ensure they exist or prompt for OELs
+    const allAgents = Array.from(new Set(validRows.map(r => (r.Agent || '').trim()).filter(a => !!a)));
+    if (allAgents.length) {
+      // Load existing agents for defaults
+      const orgId = currentOrg.Uid;
+      let existing: Record<string, number> = {};
+      try {
+        const list$ = this.agentService.list(orgId);
+        const list = await firstValueFrom(list$);
+        existing = Object.fromEntries((list || []).map(a => [a.Name, a.OELNumber]));
+      } catch { }
+      // Only prompt for missing agents
+      const missing = allAgents.filter(a => existing[a] === undefined);
+      if (missing.length) {
+        const dlg = this.dialog.open(AgentsDialogComponent, { data: { agents: missing, existing }, width: '520px' });
+        const result = await dlg.afterClosed().toPromise();
+        if (!result) {
+          this.snackBar.open('Agent entry canceled.', 'Dismiss', { duration: 3000, verticalPosition: 'top' });
+          return;
+        }
+        // Persist/merge agents to org subcollection
+        for (const row of result) {
+          if (!row?.Name) continue;
+          try { await this.agentService.upsert(orgId, { Name: row.Name, OELNumber: Number(row.OELNumber) }); } catch { }
+        }
+      }
+    }
     // Separate into exposure groups and save each group concurrently
     const grouped = this.exposureGroupservice.separateSampleInfoByExposureGroup(validRows);
     // Track recompute: snapshot the time and the doc ids that will be affected

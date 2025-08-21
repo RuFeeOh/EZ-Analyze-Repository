@@ -56,6 +56,11 @@ service cloud.firestore {
       // Delete
       allow delete: if isUserInOrganization(get(/databases/$(database)/documents/organizations/$(orgId)));
     }
+    // Agents under organization
+    match /organizations/{orgId}/agents/{agentId} {
+      allow get, list: if isUserInOrganization(get(/databases/$(database)/documents/organizations/$(orgId)));
+      allow create, update, delete: if isUserInOrganization(get(/databases/$(database)/documents/organizations/$(orgId)));
+    }
 
     match /breakdownTask/{task} {
       allow read, write: if isCreator();

@@ -24,12 +24,15 @@ The user can create an organizations. Upon creating an organization, the newly c
 
 ### Data
 
-The data page is currently used for uploading of the excel spreadsheets. There is a table which allows the user to verify its the correct data before clicking the save button. Excel spreadsheets can have multiple exposureGroups so when parsing the data it's important to separate out the data into each exposureGroup
+The data page is currently used for uploading of the excel spreadsheets. There is a table which allows the user to verify its the correct data before clicking the save button. Excel spreadsheets can have multiple exposureGroups so when parsing the data it's important to separate out the data into each exposureGroup. When clicking save, the exposure groups should be checked against the Agents in an organization to see if they exist or not. If they all exist then save will work no problem. If there is one or more agents missing, the user will be prompted to input the OEL for each agent. There will also be a toggle to "Assume 0.05" which will populate every agent found in the import with 0.05 as the OEL.
 
 ### Exceedance Fraction
 
 The exceedance fraction page will show all the exceedance fractions for all the exposureGroups in the current organization. There will be a grid showing the exposureGroup, ExceedanceFraction, Calculation Date, and how many samples were used for the calculation. The grid will be sorted so the most recent calculated exceedance fractions are at the top. Each row will be able to expand to show the samples that were used. Above the grid will be a toggle to "Show Latest" which will filter the grid to show only the latest exceedance fraction per exposureGroup; this toggle will be on by default.
 
+### Agents
+
+This agent page will allow user to CRUD agents. Agents will consist of a Name and OEL. There will be a grid with the Agents, OEL, and the count of ExpsoureGroups using the Agent. Each agent row will expand to show the exposure groups which use the agent. When calculating an exceedance fraction, the Agent should be looked up and, if not found, ask the user what the OEL for this new agent should be then the OEL from the agent should be used to calculate the Exceedance Fraction.
 
 ## Privacy and sharing
 
@@ -40,8 +43,12 @@ Users will be able to create an organization. This organizaiton will be scoped t
 To start a local development server, run:
 
 ```bash
-ng serve
+npm start
 ```
+
+or in VsCode select the debugger and play the `npm start` command
+
+the VsCode will auto open 
 
 Once the server is running, open your browser and navigate to `http://localhost:4200/`. The application will automatically reload whenever you modify any of the source files.
 
