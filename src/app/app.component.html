@@ -29,6 +29,10 @@
                *ngIf="organizationService.currentOrg?.Name"
                routerLink="/exposure-groups"
                routerLinkActive="mdc-list-item--activated">Exposure Groups</a>
+            <a mat-list-item
+               *ngIf="organizationService.currentOrg?.Name"
+               routerLink="/agents"
+               routerLinkActive="mdc-list-item--activated">Agents</a>
          </mat-nav-list>
       </mat-drawer>
       <mat-drawer-content>

@@ -4,6 +4,7 @@ import { DataComponent } from './pages/data/data.component';
 import { OrganizationSelectorComponent } from './pages/organization-selector/organization-selector.component';
 import { ExceedanceFractionComponent } from './pages/exceedance-fraction/exceedance-fraction.component';
 import { ExposureGroupsComponent } from './pages/exposure-groups/exposure-groups.component';
+import { AgentsComponent } from './pages/agents/agents.component';
 
 export const routes: Routes = [
     {
@@ -31,5 +32,11 @@ export const routes: Routes = [
         path: 'exposure-groups',
         title: 'Exposure Groups',
         component: ExposureGroupsComponent,
+    }
+    ,
+    {
+        path: 'agents',
+        title: 'Agents',
+        component: AgentsComponent,
     }
 ];
