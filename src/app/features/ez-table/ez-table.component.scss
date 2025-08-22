@@ -2,6 +2,13 @@
     cursor: pointer;
 }
 
+.ez-table-viewport {
+    /* JS will set max-height dynamically; ensure sensible baseline */
+    min-height: 300px;
+    overflow: auto;
+    margin-bottom: 8px;
+}
+
 .detail-row td {
     padding: 0px 30px !important;
     border-bottom: none !important;

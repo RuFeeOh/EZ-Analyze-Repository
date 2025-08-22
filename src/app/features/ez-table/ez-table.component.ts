@@ -1,4 +1,4 @@
-import { AfterViewInit, Component, ContentChild, TemplateRef, computed, input, signal, ViewChild, WritableSignal, inject } from '@angular/core';
+import { AfterViewInit, Component, ContentChild, ElementRef, HostListener, TemplateRef, computed, input, signal, ViewChild, WritableSignal, inject } from '@angular/core';
 import { MatPaginator, MatPaginatorModule } from '@angular/material/paginator';
 import { MatTable, MatTableDataSource, MatTableModule } from '@angular/material/table';
 import { MatSort, MatSortModule, Sort } from '@angular/material/sort';
@@ -49,8 +49,8 @@ export class EzTableComponent implements AfterViewInit {
   readonly defaultSortActive = input<string | null>(null);
   readonly defaultSortDirection = input<'asc' | 'desc'>('asc');
   // Paginator config
-  readonly pageSize = input<number>(10);
-  readonly pageSizeOptions = input<number[]>([5, 10, 25, 50]);
+  readonly pageSize = input<number>(1000);
+  readonly pageSizeOptions = input<number[]>([5, 10, 25, 50, 1000]);
 
   // Deprecated/back-compat inputs (will be removed when callers migrate)
   readonly displayedColumns = input<(string | EzColumn)[]>(['SampleDate', 'ExposureGroup', 'TWA', 'Notes', 'SampleNumber']);
@@ -62,6 +62,14 @@ export class EzTableComponent implements AfterViewInit {
   paginatorSignal: WritableSignal<MatPaginator | null> = signal(null);
   sortSignal: WritableSignal<MatSort | null> = signal(null);
   @ViewChild(MatTable) private table?: MatTable<any>;
+  // Store viewport element and trigger resize when it becomes available
+  private _viewportEl?: ElementRef<HTMLDivElement>;
+  @ViewChild('viewport')
+  set viewportEl(el: ElementRef<HTMLDivElement> | undefined) {
+    this._viewportEl = el;
+    // When the viewport appears (including after conditional renders), size it
+    this.resizeViewport();
+  }
 
   // Use setters so we catch when the view branch with matSort/matPaginator appears later
   @ViewChild(MatPaginator)
@@ -162,7 +170,7 @@ export class EzTableComponent implements AfterViewInit {
   }
 
   get groupColumns(): string[] {
-    return [ ...(this.hasDetail() ? ['expand'] : []), ...this.summaryColumnIds() ];
+    return [...(this.hasDetail() ? ['expand'] : []), ...this.summaryColumnIds()];
   }
 
   // Optional: announce sort changes for accessibility
@@ -180,6 +188,7 @@ export class EzTableComponent implements AfterViewInit {
   ngAfterViewInit() {
     // Nothing needed here; we attach sort/paginator in the @ViewChild setters because
     // the table may render conditionally after init.
+    this.resizeViewport();
   }
 
   private applyDefaultSortIfNeeded() {
@@ -202,6 +211,25 @@ export class EzTableComponent implements AfterViewInit {
         }
       } catch { }
     });
+  }
+
+  // Dynamically size the viewport to fill remaining window space while respecting
+  // min and max caps. Max around 70vh, min 300px.
+  @HostListener('window:resize')
+  private resizeViewport() {
+    const el = this._viewportEl?.nativeElement;
+    if (!el) return;
+    try {
+      const rect = el.getBoundingClientRect();
+      const windowH = window.innerHeight || document.documentElement.clientHeight;
+      // Space available from top of viewport container to bottom of window
+      const available = Math.max(0, windowH - rect.top - 16); // leave small bottom gap
+      const maxCap = Math.round(windowH * 0.7);
+      const target = Math.min(available, maxCap);
+      const clamped = Math.max(300, target);
+      el.style.maxHeight = clamped + 'px';
+      el.style.overflow = 'auto';
+    } catch { /* no-op */ }
   }
 
   private mapExposureGroupsToTableItems(exposureGroups: ExposureGroup[]): ExposureGroupTableItem[] {
