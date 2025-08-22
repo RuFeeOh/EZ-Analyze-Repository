@@ -9,6 +9,7 @@
 </div>
 
 <ez-table [items]="(agents$ | async) ?? []"
+          [keyFor]="keyForAgent"
           [summaryColumns]="[
             { Name: 'Name', DisplayName: 'Name' },
             { Name: 'OELNumber', DisplayName: 'OEL' },

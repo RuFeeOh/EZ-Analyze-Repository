@@ -40,6 +40,8 @@ export class EzTableComponent implements AfterViewInit {
   readonly detailColumns = input<(string | EzColumn)[]>([]);
   readonly items = input<any[]>([]);
   readonly detailFor = input<(item: any) => any[] | undefined>();
+  // Optional: custom row key accessor for expansion tracking and identity
+  readonly keyFor = input<(item: any) => string | number | null | undefined>();
   // Filtering support (by default, filters by ExposureGroup)
   readonly filterText = input<string>('');
   readonly filterKey = input<string>('ExposureGroup');
@@ -221,6 +223,14 @@ export class EzTableComponent implements AfterViewInit {
   }
 
   private groupKey(group: any): string {
+    // Prefer a custom key accessor if provided
+    const keyAccessor = this.keyFor();
+    if (typeof keyAccessor === 'function') {
+      try {
+        const k = keyAccessor(group);
+        if (k !== undefined && k !== null && k !== '') return String(k);
+      } catch { /* ignore and fall back */ }
+    }
     if (group?.Uid) return String(group.Uid);
     return (group?.ExposureGroup ?? group?.Group ?? '').toString();
   }

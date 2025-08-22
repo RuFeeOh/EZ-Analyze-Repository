@@ -58,6 +58,9 @@ export class AgentsComponent {
     // table can render a single column named 'ExposureGroup'.
     detailForAgent = (a: AgentView) => (a?.Groups || []).map(g => ({ ExposureGroup: g }));
 
+    // Provide a stable key for row identity/expansion
+    keyForAgent = (a: AgentView) => (a?.Name || '').toLowerCase();
+
     async addAgent() {
         const ref = this.dialog.open(NewAgentDialogComponent, { width: '420px', data: { mode: 'create' } });
         const result = await ref.afterClosed().toPromise();
