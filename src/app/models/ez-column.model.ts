@@ -6,6 +6,8 @@ export class EzColumn {
     // - percent-badge renders a colored chip based on thresholds
     // - trend renders an up/down/flat icon based on a string value: 'up' | 'down' | 'flat'
     Format?: 'percent' | 'number' | 'date' | 'text' | 'percent-badge' | 'trend';
+    // Optional: allow disabling sorting for a specific column (e.g., Actions)
+    Sortable?: boolean = true;
     constructor(partial: Partial<EzColumn>) {
         Object.assign(this, partial);
     }

@@ -1,6 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { Component, computed, inject, signal } from '@angular/core';
-import { MatTableModule } from '@angular/material/table';
+import { Component, inject } from '@angular/core';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { MatDialog, MatDialogModule } from '@angular/material/dialog';
@@ -12,6 +11,7 @@ import { collection } from 'firebase/firestore';
 import { collectionData } from '@angular/fire/firestore';
 import { Observable, combineLatest, map } from 'rxjs';
 import { NewAgentDialogComponent } from '../agents/new-agent-dialog.component';
+import { EzTableComponent } from '../../features/ez-table/ez-table.component';
 
 interface AgentView {
     Name: string;
@@ -23,7 +23,7 @@ interface AgentView {
 @Component({
     selector: 'app-agents',
     standalone: true,
-    imports: [CommonModule, MatTableModule, MatButtonModule, MatIconModule, MatDialogModule],
+    imports: [CommonModule, MatButtonModule, MatIconModule, MatDialogModule, EzTableComponent],
     templateUrl: './agents.component.html',
     styleUrl: './agents.component.scss',
 })
@@ -33,17 +33,6 @@ export class AgentsComponent {
     private dialog = inject(MatDialog);
     private snack = inject(SnackService);
     private firestore = inject(Firestore);
-
-    displayedColumns = ['expand', 'Name', 'OELNumber', 'UsageCount', 'Actions'];
-    expandedKey = signal<string | null>(null);
-    rowKey = (a: AgentView) => a?.Name?.toLowerCase() || '';
-    isExpanded = (a: AgentView) => this.expandedKey() === this.rowKey(a);
-    // Row predicate for MatTable detail row (signature: (index, row) => boolean)
-    rowIsExpanded = (_index: number, row: AgentView) => this.isExpanded(row);
-    toggle(a: AgentView) {
-        const k = this.rowKey(a);
-        this.expandedKey.set(this.expandedKey() === k ? null : k);
-    }
 
     agents$!: Observable<AgentView[]>;
 
@@ -63,6 +52,11 @@ export class AgentsComponent {
             })
         );
     }
+
+    // Provide detail rows for ez-table: map the agent's Groups (string[])
+    // to an array of objects with an ExposureGroup property so the detail
+    // table can render a single column named 'ExposureGroup'.
+    detailForAgent = (a: AgentView) => (a?.Groups || []).map(g => ({ ExposureGroup: g }));
 
     async addAgent() {
         const ref = this.dialog.open(NewAgentDialogComponent, { width: '420px', data: { mode: 'create' } });

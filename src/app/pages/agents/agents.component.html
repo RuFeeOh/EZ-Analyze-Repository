@@ -8,79 +8,33 @@
     </button>
 </div>
 
-<table mat-table
-       [dataSource]="(agents$ | async) ?? []"
-       class="mat-elevation-z8"
-       multiTemplateDataRows>
-    <ng-container matColumnDef="expand">
-        <th mat-header-cell
-            *matHeaderCellDef></th>
-        <td mat-cell
-            *matCellDef="let a">
-            <button mat-icon-button
-                    (click)="toggle(a)">
-                <mat-icon>{{ isExpanded(a) ? 'keyboard_arrow_down' : 'keyboard_arrow_right' }}</mat-icon>
-            </button>
-        </td>
-    </ng-container>
-
-    <ng-container matColumnDef="Name">
-        <th mat-header-cell
-            *matHeaderCellDef>Name</th>
-        <td mat-cell
-            *matCellDef="let a">{{ a.Name }}</td>
-    </ng-container>
-
-    <ng-container matColumnDef="OELNumber">
-        <th mat-header-cell
-            *matHeaderCellDef>OEL</th>
-        <td mat-cell
-            *matCellDef="let a">{{ a.OELNumber }}</td>
-    </ng-container>
-
-    <ng-container matColumnDef="UsageCount">
-        <th mat-header-cell
-            *matHeaderCellDef>Usage</th>
-        <td mat-cell
-            *matCellDef="let a">{{ a.UsageCount }}</td>
-    </ng-container>
-
-    <ng-container matColumnDef="Actions">
-        <th mat-header-cell
-            *matHeaderCellDef></th>
-        <td mat-cell
-            *matCellDef="let a"
-            style="text-align:right;">
-            <button mat-button
-                    (click)="editAgent(a)">Edit</button>
-            <button mat-button
-                    color="warn"
-                    (click)="deleteAgent(a)">Delete</button>
-        </td>
-    </ng-container>
-
-    <tr mat-header-row
-        *matHeaderRowDef="displayedColumns"></tr>
-    <tr mat-row
-        *matRowDef="let row; columns: displayedColumns;"></tr>
-    <ng-container matColumnDef="expandedDetail">
-        <td mat-cell
-            *matCellDef="let a"
-            [attr.colspan]="displayedColumns.length">
-            <div class="detail-row-content"
-                 *ngIf="isExpanded(a)">
-                <div style="padding:8px 16px; opacity:0.9;">
-                    <div style="font-size:12px; margin-bottom:4px;">Exposure Groups using this agent:</div>
-                    <ul style="margin:0; padding-left: 16px;">
-                        <li *ngFor="let g of a.Groups">{{ g }}</li>
-                    </ul>
+<ez-table [items]="(agents$ | async) ?? []"
+          [summaryColumns]="[
+            { Name: 'Name', DisplayName: 'Name' },
+            { Name: 'OELNumber', DisplayName: 'OEL' },
+            { Name: 'UsageCount', DisplayName: 'Usage' },
+            { Name: 'Actions', DisplayName: '', Sortable: false }
+          ]"
+          [detailColumns]="[{ Name: 'ExposureGroup', DisplayName: 'Exposure Group' }]"
+          [detailFor]="detailForAgent"
+          defaultSortActive="Name"
+          defaultSortDirection="asc">
+    <ng-template #cell
+                 let-item
+                 let-col="column">
+        <ng-container [ngSwitch]="col && (col.Name || col)">
+            <ng-container *ngSwitchCase="'Actions'">
+                <div style="text-align:right; width:100%;">
+                    <button mat-button
+                            (click)="editAgent(item)">Edit</button>
+                    <button mat-button
+                            color="warn"
+                            (click)="deleteAgent(item)">Delete</button>
                 </div>
-            </div>
-        </td>
-    </ng-container>
-    <tr mat-row
-        *matRowDef="let row; columns: ['expandedDetail'];"
-        class="detail-row"></tr>
-</table>
-
-<!-- end expanded detail template -->
+            </ng-container>
+            <ng-container *ngSwitchDefault>
+                {{ (col?.Name ? item[col.Name] : item[col]) }}
+            </ng-container>
+        </ng-container>
+    </ng-template>
+        </ez-table>

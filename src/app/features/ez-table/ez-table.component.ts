@@ -1,4 +1,4 @@
-import { AfterViewInit, Component, computed, input, signal, ViewChild, WritableSignal, inject } from '@angular/core';
+import { AfterViewInit, Component, ContentChild, TemplateRef, computed, input, signal, ViewChild, WritableSignal, inject } from '@angular/core';
 import { MatPaginator, MatPaginatorModule } from '@angular/material/paginator';
 import { MatTable, MatTableDataSource, MatTableModule } from '@angular/material/table';
 import { MatSort, MatSortModule, Sort } from '@angular/material/sort';
@@ -36,25 +36,25 @@ export class EzTableComponent implements AfterViewInit {
   // - items: the top-level rows (array of any)
   // - detailFor: function to get detail items for an item
   // Back-compat: if items not provided, it can derive a flat table from dataResults; if items provided, old data input is ignored.
-  summaryColumns = input<(string | EzColumn)[]>([]);
-  detailColumns = input<(string | EzColumn)[]>([]);
-  items = input<any[]>([]);
-  detailFor = input<(item: any) => any[] | undefined>();
+  readonly summaryColumns = input<(string | EzColumn)[]>([]);
+  readonly detailColumns = input<(string | EzColumn)[]>([]);
+  readonly items = input<any[]>([]);
+  readonly detailFor = input<(item: any) => any[] | undefined>();
   // Filtering support (by default, filters by ExposureGroup)
-  filterText = input<string>('');
-  filterKey = input<string>('ExposureGroup');
+  readonly filterText = input<string>('');
+  readonly filterKey = input<string>('ExposureGroup');
   // Default sort support
-  defaultSortActive = input<string | null>(null);
-  defaultSortDirection = input<'asc' | 'desc'>('asc');
+  readonly defaultSortActive = input<string | null>(null);
+  readonly defaultSortDirection = input<'asc' | 'desc'>('asc');
   // Paginator config
-  pageSize = input<number>(10);
-  pageSizeOptions = input<number[]>([5, 10, 25, 50]);
+  readonly pageSize = input<number>(10);
+  readonly pageSizeOptions = input<number[]>([5, 10, 25, 50]);
 
   // Deprecated/back-compat inputs (will be removed when callers migrate)
-  displayedColumns = input<(string | EzColumn)[]>(['SampleDate', 'ExposureGroup', 'TWA', 'Notes', 'SampleNumber']);
-  data = input<ExposureGroup[]>([]);
-  dataResults = input<SampleInfo[]>([]);
-  detailSource = input<'group' | 'ef'>('group');
+  readonly displayedColumns = input<(string | EzColumn)[]>(['SampleDate', 'ExposureGroup', 'TWA', 'Notes', 'SampleNumber']);
+  readonly data = input<ExposureGroup[]>([]);
+  readonly dataResults = input<SampleInfo[]>([]);
+  readonly detailSource = input<'group' | 'ef' | null>(null);
 
   private defaultSortApplied = false;
   paginatorSignal: WritableSignal<MatPaginator | null> = signal(null);
@@ -152,8 +152,15 @@ export class EzTableComponent implements AfterViewInit {
   });
 
   // Columns for the group table (expand + configured summary columns)
+  protected hasDetail(): boolean {
+    if (this.detailFor()) return true;
+    const cols = this.detailColumns();
+    if (cols && cols.length > 0) return true;
+    return this.detailSource() != null;
+  }
+
   get groupColumns(): string[] {
-    return ['expand', ...this.summaryColumnIds()];
+    return [ ...(this.hasDetail() ? ['expand'] : []), ...this.summaryColumnIds() ];
   }
 
   // Optional: announce sort changes for accessibility
@@ -218,12 +225,12 @@ export class EzTableComponent implements AfterViewInit {
     return (group?.ExposureGroup ?? group?.Group ?? '').toString();
   }
 
-  isExpanded(group: any): boolean {
+  protected isExpanded(group: any): boolean {
     if (!group) return false;
     return this.expandedKey === this.groupKey(group);
   }
 
-  toggle(group: any) {
+  protected toggle(group: any) {
     const key = this.groupKey(group);
     this.expandedKey = (this.expandedKey === key) ? null : key;
     // Ensure table re-renders row defs (including the detail row) immediately
@@ -231,28 +238,32 @@ export class EzTableComponent implements AfterViewInit {
   }
 
   // Row predicate to render expanded detail rows only for expanded items
-  rowIsExpanded = (_index: number, row: any) => this.expandedKey === this.groupKey(row);
+  protected rowIsExpanded = (_index: number, row: any) => this.expandedKey === this.groupKey(row);
 
   // Template helpers
-  columnId(col: string | EzColumn): string {
+  protected columnId(col: string | EzColumn): string {
     return typeof col === 'string' ? col : col.Name;
   }
 
-  columnHeader(col: string | EzColumn): string {
+  protected columnHeader(col: string | EzColumn): string {
     return typeof col === 'string' ? col : (col.DisplayName || col.Name);
   }
 
+  protected isSortable(col: string | EzColumn): boolean {
+    return typeof col === 'string' ? true : (col.Sortable !== false);
+  }
+
   // Format helpers used by the template
-  isPercentBadge(col: string | EzColumn): boolean {
+  protected isPercentBadge(col: string | EzColumn): boolean {
     return typeof col !== 'string' && (col?.Format === 'percent-badge');
   }
 
-  isTrend(col: string | EzColumn): boolean {
+  protected isTrend(col: string | EzColumn): boolean {
     return typeof col !== 'string' && (col?.Format === 'trend');
   }
 
   // Resolve values for summary/detail cells
-  valueFor(item: any, col: string | EzColumn, section: 'summary' | 'detail'): any {
+  protected valueFor(item: any, col: string | EzColumn, section: 'summary' | 'detail'): any {
     const key = this.columnId(col);
     // Special handling for common group fields when using defaults
     if (key === 'ExposureGroup') {
@@ -318,7 +329,7 @@ export class EzTableComponent implements AfterViewInit {
 
   // Formatting is handled by ezFormat pipe in the template.
 
-  detailsForItem(item: any): any[] {
+  protected detailsForItem(item: any): any[] {
     const accessor = this.detailFor();
     if (accessor) {
       try {
@@ -353,4 +364,8 @@ export class EzTableComponent implements AfterViewInit {
     // Flat table has no summary concept
     return [];
   }
+
+  // Content-projected templates for custom cells or detail rendering
+  @ContentChild('cell', { read: TemplateRef }) cellTpl?: TemplateRef<any>;
+  @ContentChild('detail', { read: TemplateRef }) detailTpl?: TemplateRef<any>;
 }
