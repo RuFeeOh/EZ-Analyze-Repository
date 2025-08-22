@@ -93,3 +93,7 @@ tr.detail-row {
     color: #374151;
     /* gray-700 */
 }
+
+tr:not(.detail-row):not(.mat-mdc-header-row):hover {
+    background: rgba(225, 225, 225, 0.05);
+}
