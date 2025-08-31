@@ -51,7 +51,17 @@
             *matHeaderCellDef>{{ headerLabels[column] || column }}</th>
         <td mat-cell
             *matCellDef="let element">
-            {{ column === 'SampleDate' ? (element[column] | date:'dd-MMM-yyyy') : element[column] }}
+            @switch (column) {
+            @case ('SampleDate') {
+            {{ element[column] | date:'dd-MMM-yyyy' }}
+            }
+            @case ('TWA'){
+            {{ element[column] | number:'1.2-3' }}
+            }
+            @default {
+            {{ element[column] }}
+            }
+            }
         </td>
     </ng-container>
     }
