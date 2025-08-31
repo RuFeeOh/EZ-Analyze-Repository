@@ -1,30 +1,48 @@
 <div class="ef-toolbar"
      style="display:flex; align-items:center; gap:12px; margin-bottom:8px;">
-    <mat-slide-toggle [checked]="showLatest()"
-                      (change)="showLatest.set($event.checked)">
-        Show Latest
-    </mat-slide-toggle>
-    <input type="text"
-           placeholder="Filter by Exposure Group"
-           [value]="filter()"
-           (input)="filter.set(($any($event.target).value || ''))"
-           style="flex:1; max-width:320px; padding:6px 10px; border:1px solid #ccc; border-radius:4px;" />
+     <mat-slide-toggle [checked]="showLatest()"
+                       (change)="showLatest.set($event.checked)">
+          Show Latest
+     </mat-slide-toggle>
+     <input type="text"
+            placeholder="Filter by Exposure Group"
+            [value]="filter()"
+            (input)="filter.set(($any($event.target).value || ''))"
+            style="flex:1; max-width:320px; padding:6px 10px; border:1px solid #ccc; border-radius:4px;" />
 </div>
 
 <div class="ef-legend"
      style="display:flex; align-items:center; gap:12px; margin: 4px 0 8px 0; font-size: 12px;">
-    <span>Legend:</span>
-    <span class="ef-badge ef-good">&lt; 5%</span>
-    <span class="ef-badge ef-warn">5% – 20%</span>
-    <span class="ef-badge ef-bad">≥ 20%</span>
-    <span style="opacity:0.7;">(lower is better)</span>
-    <span style="opacity:0.7;">Trend: <mat-icon inline
-                  style="vertical-align: middle; color:#dc2626;">arrow_upward</mat-icon> bad, <mat-icon inline
-                  style="vertical-align: middle; color:#16a34a;">arrow_downward</mat-icon> good</span>
+     <span>Legend:</span>
+     <button type="button"
+             class="ef-badge ef-good"
+             [class.active]="bucket() === 'good'"
+             [style.opacity]="bucket() && bucket() !== 'good' ? 0.35 : 1"
+             (click)="bucket.set(bucket() === 'good' ? '' : 'good')">
+          &lt; 5%
+     </button>
+     <button type="button"
+             class="ef-badge ef-warn"
+             [class.active]="bucket() === 'warn'"
+             [style.opacity]="bucket() && bucket() !== 'warn' ? 0.35 : 1"
+             (click)="bucket.set(bucket() === 'warn' ? '' : 'warn')">
+          5% – 20%
+     </button>
+     <button type="button"
+             class="ef-badge ef-bad"
+             [class.active]="bucket() === 'bad'"
+             [style.opacity]="bucket() && bucket() !== 'bad' ? 0.35 : 1"
+             (click)="bucket.set(bucket() === 'bad' ? '' : 'bad')">
+          ≥ 20%
+     </button>
+     <span style="opacity:0.7;">(lower is better)</span>
+     <span style="opacity:0.7;">Trend: <mat-icon inline
+                    style="vertical-align: middle; color:#dc2626;">arrow_upward</mat-icon> bad, <mat-icon inline
+                    style="vertical-align: middle; color:#16a34a;">arrow_downward</mat-icon> good</span>
 
 </div>
 
-<ez-table [items]="(showLatest() ? (latestEfItems$ | async) : (efItems$ | async)) ?? []"
+<ez-table [items]="(showLatest() ? (filteredLatestEfItems$ | async) : (filteredEfItems$ | async)) ?? []"
           [summaryColumns]="efSummaryColumns"
           [detailColumns]="efDetailColumns"
           [detailFor]="efDetailForItem"

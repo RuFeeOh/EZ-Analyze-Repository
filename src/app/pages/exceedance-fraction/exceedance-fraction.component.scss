@@ -7,6 +7,9 @@
     line-height: 18px;
     font-weight: 600;
     color: #0f172a;
+    border: none;
+    cursor: pointer;
+    transition: transform 120ms ease, box-shadow 120ms ease, opacity 120ms ease;
 }
 
 .ef-good {
@@ -22,4 +25,17 @@
 .ef-bad {
     background: #fecaca;
     color: #7f1d1d;
+}
+
+.ef-badge:focus-visible {
+    outline: 2px solid rgba(59, 130, 246, 0.6);
+    outline-offset: 2px;
+}
+
+.ef-badge.active {
+    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.6) inset;
+}
+
+.ef-badge:hover {
+    transform: translateY(-1px);
 }

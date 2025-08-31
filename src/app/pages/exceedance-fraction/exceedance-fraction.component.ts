@@ -1,4 +1,5 @@
 import { Component, inject, signal } from '@angular/core';
+import { toObservable } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
 import { Firestore } from '@angular/fire/firestore';
 import { collection, query, where } from 'firebase/firestore';
@@ -10,7 +11,7 @@ import { MatButtonModule } from '@angular/material/button';
 import { MatSlideToggleModule } from '@angular/material/slide-toggle';
 import { EzTableComponent } from '../../features/ez-table/ez-table.component';
 import { SampleInfo } from '../../models/sample-info.model';
-import { Observable } from 'rxjs';
+import { Observable, combineLatest } from 'rxjs';
 import { map } from 'rxjs/operators';
 import { EzColumn } from '../../models/ez-column.model';
 
@@ -28,10 +29,20 @@ export class ExceedanceFractionComponent {
   // Streams
   efItems$!: Observable<any[]>;        // full history
   latestEfItems$!: Observable<any[]>;  // one per group
+  filteredEfItems$!: Observable<any[]>;
+  filteredLatestEfItems$!: Observable<any[]>;
   // Toggle (default ON)
   showLatest = signal(true);
   // Quick filter by Exposure Group
   filter = signal('');
+  // Legend bucket filter: '', 'good' (<5%), 'warn' (5-20%), 'bad' (>=20%)
+  bucket = signal<'' | 'good' | 'warn' | 'bad'>('');
+  private bucketFor(val: number | null | undefined): 'good' | 'warn' | 'bad' {
+    const v = typeof val === 'number' ? val : 0;
+    if (v < 0.05) return 'good';
+    if (v < 0.20) return 'warn';
+    return 'bad';
+  }
   // Table configuration for ez-table (generic)
   readonly efSummaryColumns = [
     new EzColumn({ Name: 'ExposureGroup', DisplayName: 'Exposure Group' }),
@@ -71,6 +82,7 @@ export class ExceedanceFractionComponent {
           })(),
           OELNumber: ef?.OELNumber ?? (g?.LatestExceedanceFraction?.OELNumber ?? null),
           ExceedanceFraction: ef?.ExceedanceFraction ?? 0,
+          EfBucket: this.bucketFor(ef?.ExceedanceFraction ?? 0),
           DateCalculated: ef?.DateCalculated ?? '',
           SamplesUsed: (ef?.ResultsUsed ?? []).length,
           ResultsUsed: ef?.ResultsUsed ?? [],
@@ -133,6 +145,7 @@ export class ExceedanceFractionComponent {
           })(),
           OELNumber: latest?.OELNumber ?? (g?.LatestExceedanceFraction?.OELNumber ?? null),
           ExceedanceFraction: latest?.ExceedanceFraction ?? 0,
+          EfBucket: this.bucketFor(latest?.ExceedanceFraction ?? 0),
           DateCalculated: latest?.DateCalculated ?? '',
           SamplesUsed: (latest?.ResultsUsed ?? []).length,
           ResultsUsed: latest?.ResultsUsed ?? [],
@@ -142,6 +155,14 @@ export class ExceedanceFractionComponent {
           PrevDateCalculated: (history?.length >= 2 ? (history.slice().sort((a, b) => new Date(b?.DateCalculated || 0).getTime() - new Date(a?.DateCalculated || 0).getTime())[1]?.DateCalculated ?? '') : ''),
         };
       }).sort((a, b) => new Date(b?.DateCalculated || 0).getTime() - new Date(a?.DateCalculated || 0).getTime()))
+    );
+    // Wire filtered streams to react to both data and bucket changes
+    const bucket$ = toObservable(this.bucket);
+    this.filteredEfItems$ = combineLatest([this.efItems$, bucket$]).pipe(
+      map(([items, b]) => (b ? items.filter(i => i?.EfBucket === b) : items))
+    );
+    this.filteredLatestEfItems$ = combineLatest([this.latestEfItems$, bucket$]).pipe(
+      map(([items, b]) => (b ? items.filter(i => i?.EfBucket === b) : items))
     );
   }
 

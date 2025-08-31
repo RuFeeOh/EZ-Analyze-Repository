@@ -345,6 +345,15 @@ export class EzTableComponent implements AfterViewInit {
       const t = d.getTime();
       return isNaN(t) ? 0 : t;
     };
+    // Reverse-sort mapping for Trend so that ascending puts "up" before "down"
+    if (property === 'Trend') {
+      const v = (item?.[property] ?? '').toString().toLowerCase();
+      // up < flat < down in ascending order
+      if (v === 'up') return -1;
+      if (v === 'flat') return 0;
+      if (v === 'down') return 1;
+      return 0;
+    }
     if (property === 'ExposureGroup') {
       return (item?.ExposureGroup ?? item?.Group ?? '').toString().toLowerCase();
     }
