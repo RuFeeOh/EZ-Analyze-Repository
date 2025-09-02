@@ -11,6 +11,7 @@ import { MatMenuModule } from '@angular/material/menu';
 import { Auth, GoogleAuthProvider, signInWithPopup, signOut, user } from '@angular/fire/auth';
 import { OrganizationCircleComponent } from './features/organization-circle/organization-circle.component';
 import { LeftNavigationComponent } from './features/left-navigation/left-navigation.component';
+import { HeaderComponent } from './features/header/header.component';
 
 @Component({
   selector: 'app-root',
@@ -22,8 +23,8 @@ import { LeftNavigationComponent } from './features/left-navigation/left-navigat
     MatToolbarModule,
     MatIconModule,
     MatMenuModule,
-    OrganizationCircleComponent,
     LeftNavigationComponent,
+    HeaderComponent,
   ],
   templateUrl: './app.component.html',
   styleUrl: './app.component.scss'

@@ -1,0 +1,14 @@
+<mat-toolbar color="primary"
+             class="app-toolbar">
+    <button mat-icon-button
+            aria-label="Toggle navigation"
+            (click)="onMenuClick()">
+        <mat-icon>menu</mat-icon>
+    </button>
+    <span class="app-title">EZ Analyze</span>
+    <span class="spacer"></span>
+    <organization-circle [org]="organizationService.currentOrg"
+                         (orgClicked)="goToOrg()"></organization-circle>
+    <button mat-button
+            (click)="logout()">Logout</button>
+</mat-toolbar>

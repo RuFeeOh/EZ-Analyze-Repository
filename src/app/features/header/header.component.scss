@@ -1,0 +1,16 @@
+.app-toolbar {
+    position: sticky;
+    top: 0;
+    z-index: 1000;
+    padding: 0 16px;
+    display: flex;
+    gap: 8px;
+}
+
+.app-title {
+    font-weight: 600;
+}
+
+.spacer {
+    flex: 1 1 auto;
+}
