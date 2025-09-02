@@ -1,6 +1,11 @@
 <ng-container *ngIf="user$ | async as u; else loginScreen">
    <mat-toolbar color="primary"
                 class="app-toolbar">
+      <button mat-icon-button
+              aria-label="Toggle navigation"
+              (click)="drawer.toggle()">
+         <mat-icon>menu</mat-icon>
+      </button>
       <span class="app-title">EZ Analyze</span>
       <span class="spacer"></span>
       <organization-circle [org]="organizationService.currentOrg"
@@ -10,7 +15,8 @@
    </mat-toolbar>
 
    <mat-drawer-container class="app-container">
-      <mat-drawer mode="side"
+      <mat-drawer #drawer
+                  mode="side"
                   opened
                   class="app-sidenav">
          <mat-nav-list>

@@ -8,20 +8,16 @@
     top: 0;
     z-index: 1000;
     padding: 0 16px;
+    display: flex;
+    gap: 8px;
 }
 
 .app-title {
     font-weight: 600;
-    margin-left: 4px;
 }
 
 .spacer {
     flex: 1 1 auto;
-}
-
-/* Org circle sits near auth buttons */
-.app-toolbar organization-circle {
-    margin-right: 8px;
 }
 
 .app-container {
