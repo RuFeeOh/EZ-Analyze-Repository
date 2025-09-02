@@ -25,6 +25,12 @@ export class EzFormatPipe implements PipeTransform {
             return formatDateDDMMMYYYY(value);
         }
 
+        // Domain-specific: TWA should be rounded to three decimals
+        if (key === 'TWA') {
+            const num = typeof value === 'number' ? value : Number(value ?? 0);
+            return new Intl.NumberFormat(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 }).format(num);
+        }
+
         const fmt = typeof col === 'string' ? undefined : col?.Format;
         if (fmt === 'percent') {
             const num = typeof value === 'number' ? value : Number(value ?? 0);
