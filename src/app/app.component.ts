@@ -1,5 +1,5 @@
-import { Component, inject } from '@angular/core';
-import { RouterOutlet, RouterLink, RouterLinkActive } from '@angular/router';
+import { Component, ViewChild, inject } from '@angular/core';
+import { Router } from '@angular/router';
 import { MatButtonModule } from '@angular/material/button';
 import { MatSidenavModule } from '@angular/material/sidenav';
 import { MatListModule } from '@angular/material/list';
@@ -10,22 +10,20 @@ import { MatIconModule } from '@angular/material/icon';
 import { MatMenuModule } from '@angular/material/menu';
 import { Auth, GoogleAuthProvider, signInWithPopup, signOut, user } from '@angular/fire/auth';
 import { OrganizationCircleComponent } from './features/organization-circle/organization-circle.component';
-import { Router } from '@angular/router';
+import { LeftNavigationComponent } from './features/left-navigation/left-navigation.component';
 
 @Component({
   selector: 'app-root',
   imports: [
     CommonModule,
-    RouterOutlet,
-    RouterLink,
-    RouterLinkActive,
     MatButtonModule,
     MatSidenavModule,
     MatListModule,
     MatToolbarModule,
     MatIconModule,
     MatMenuModule,
-  OrganizationCircleComponent,
+    OrganizationCircleComponent,
+    LeftNavigationComponent,
   ],
   templateUrl: './app.component.html',
   styleUrl: './app.component.scss'
@@ -37,6 +35,7 @@ export class AppComponent {
   public auth = inject(Auth);
   public user$ = user(this.auth);
   private router = inject(Router);
+  @ViewChild('leftNav') leftNav?: LeftNavigationComponent;
 
   async login() {
     try {
