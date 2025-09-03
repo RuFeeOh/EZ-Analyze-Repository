@@ -41,67 +41,9 @@
                 <!-- Projected cell template takes precedence -->
                 <ng-container *ngIf="cellTpl; else defaultCell"
                               [ngTemplateOutlet]="cellTpl"
-                              [ngTemplateOutletContext]="{ $implicit: item, column: column }"></ng-container>
+                              [ngTemplateOutletContext]="{ $implicit: item, column: column, id: columnId(column), section: 'summary', value: valueFor(item, column, 'summary') }"></ng-container>
                 <ng-template #defaultCell>
-                    @if (isPercentBadge(column)) {
-                    @let raw = valueFor(item, column, 'summary');
-                    @let val = (raw ?? 0);
-                    <span class="ef-badge"
-                          [class.ef-good]="val < 0.05"
-                          [class.ef-warn]="val >= 0.05 && val < 0.2"
-                          [class.ef-bad]="val >= 0.2">
-                        {{ val | ezFormat: { Name: columnId(column), Format: 'percent' } }}
-                    </span>
-                    } @else if (isTrend(column)) {
-                    @let t = valueFor(item, column, 'summary');
-                    @let delta = (item?.Delta ?? 0);
-                    @let deltaAbs = (delta < 0
-                      ?
-                      -delta
-                      :
-                      delta);
-                      @let
-                      sign=(delta> 0 ? '+' : (delta < 0
-                          ? '−'
-                          : ''
-                          ));
-                          @let
-                          prev=(item?.PrevExceedanceFraction
-                          ??
-                          null);
-                          @let
-                          prevDate=(item?.PrevDateCalculated
-                          ?? ''
-                          );
-                          @let
-                          curr=(item?.ExceedanceFraction
-                          ??
-                          null);
-                          <span
-                          class="trend"
-                          [class.trend-up]="t === 'up'"
-                          [class.trend-down]="t === 'down'"
-                          [class.trend-flat]="t !== 'up' && t !== 'down'"
-                          [matTooltip]="(prev != null && curr != null)
-                                        ? ('From ' + (prev | ezFormat: { Name: 'Prev', Format: 'percent' })
-                                                + ' on ' + (prevDate | ezFormat: { Name: 'DateCalculated', Format: 'date' })
-                                                + ' to ' + (curr | ezFormat: { Name: 'Curr', Format: 'percent' })
-                                                + ' (' + sign + (deltaAbs | ezFormat: { Name: 'Delta', Format: 'percent' }) + ')')
-                                        : 'No previous value'"
-                          [attr.aria-label]="(prev != null && curr != null)
-                                        ? ('From ' + (prev | ezFormat: { Name: 'Prev', Format: 'percent' })
-                                                + ' on ' + (prevDate | ezFormat: { Name: 'DateCalculated', Format: 'date' })
-                                                + ' to ' + (curr | ezFormat: { Name: 'Curr', Format: 'percent' })
-                                                + ' (' + sign + (deltaAbs | ezFormat: { Name: 'Delta', Format: 'percent' }) + ')')
-                                        : 'No previous value'">
-                            <mat-icon inline>
-                                {{ t === 'up' ? 'arrow_upward' : (t === 'down' ? 'arrow_downward' : 'horizontal_rule') }}
-                            </mat-icon>
-                            <span class="trend-delta">{{ sign }}{{ deltaAbs | ezFormat: { Name: 'Delta', Format: 'percent' } }}</span>
-                            </span>
-                            } @else {
-                            {{ valueFor(item, column, 'summary') | ezFormat: column }}
-                            }
+                    {{ valueFor(item, column, 'summary') }}
                 </ng-template>
             </td>
         </ng-container>
@@ -123,11 +65,16 @@
                                 *matHeaderCellDef>{{ columnHeader(column) }}</th>
                             <td mat-cell
                                 *matCellDef="let item">
-                                <ng-container *ngIf="detailTpl; else defaultDetailCell"
+                                <ng-container *ngIf="detailTpl; else detailCellTplFallback"
                                               [ngTemplateOutlet]="detailTpl"
-                                              [ngTemplateOutletContext]="{ $implicit: item, column: column }"></ng-container>
+                                              [ngTemplateOutletContext]="{ $implicit: item, column: column, id: columnId(column), section: 'detail', value: valueFor(item, column, 'detail') }"></ng-container>
+                                <ng-template #detailCellTplFallback>
+                                    <ng-container *ngIf="cellTpl; else defaultDetailCell"
+                                                  [ngTemplateOutlet]="cellTpl"
+                                                  [ngTemplateOutletContext]="{ $implicit: item, column: column, id: columnId(column), section: 'detail', value: valueFor(item, column, 'detail') }"></ng-container>
+                                </ng-template>
                                 <ng-template #defaultDetailCell>
-                                    {{ valueFor(item, column, 'detail') | ezFormat: column }}
+                                    {{ valueFor(item, column, 'detail') }}
                                 </ng-template>
                             </td>
                         </ng-container>
@@ -168,7 +115,7 @@
                 *matCellDef="let element">
                 <ng-container *ngIf="cellTpl; else flatDefaultCell"
                               [ngTemplateOutlet]="cellTpl"
-                              [ngTemplateOutletContext]="{ $implicit: element, column: column }"></ng-container>
+                              [ngTemplateOutletContext]="{ $implicit: element, column: column, id: columnId(column), section: 'summary', value: valueFor(element, column, 'summary') }"></ng-container>
                 <ng-template #flatDefaultCell>
                     {{ element[columnId(column)] }}
                 </ng-template>

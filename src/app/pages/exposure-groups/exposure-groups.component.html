@@ -13,4 +13,15 @@
         { Name: 'ResultsTotalCount', DisplayName: 'Samples' }
 	]"
           [detailColumns]="['SampleDate','ExposureGroup','TWA','Notes','SampleNumber']"
-          [detailFor]="detailForFn"></ez-table>
+          [detailFor]="detailForFn">
+    <ng-template #cell
+                 let-item
+                 let-id="id"
+                 let-value="value">
+        <ng-container [ngSwitch]="id">
+            <ng-container *ngSwitchCase="'SampleDate'">{{ value | date:'mediumDate' }}</ng-container>
+            <ng-container *ngSwitchCase="'TWA'">{{ value | number:'1.3-3' }}</ng-container>
+            <ng-container *ngSwitchDefault>{{ value }}</ng-container>
+        </ng-container>
+    </ng-template>
+</ez-table>
