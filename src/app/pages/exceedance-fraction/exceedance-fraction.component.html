@@ -66,16 +66,51 @@
                     </span>
                </ng-container>
                <ng-container *ngSwitchCase="'Trend'">
-                    <ng-container>
+                    <span class="trend"
+                          [class.trend-up]="item?.Trend === 'up'"
+                          [class.trend-down]="item?.Trend === 'down'"
+                          [class.trend-flat]="item?.Trend !== 'up' && item?.Trend !== 'down'">
                          <mat-icon inline
-                                   [style.color]="item?.Trend === 'up' ? '#dc2626' : (item?.Trend === 'down' ? '#16a34a' : 'inherit')">
+                                   [matTooltip]="(item?.PrevExceedanceFraction != null && item?.ExceedanceFraction != null)
+                                                 ? ('From ' + (item?.PrevExceedanceFraction | percent:'1.1-1')
+                                                    + ' on ' + (item?.PrevDateCalculated | date:'mediumDate')
+                                                    + ' to ' + (item?.ExceedanceFraction | percent:'1.1-1')
+                                                    + ' (' + ((item?.Delta ?? 0) > 0 ? '+' : ((item?.Delta ?? 0) < 0 ? '−' : ''))
+                                                    + (((item?.Delta ?? 0) < 0 ? (-(item?.Delta ?? 0)) : (item?.Delta ?? 0)) | percent:'1.1-1') + ')')
+                                                 : 'No previous value'"
+                                   [attr.aria-label]="(item?.PrevExceedanceFraction != null && item?.ExceedanceFraction != null)
+                                                 ? ('From ' + (item?.PrevExceedanceFraction | percent:'1.1-1')
+                                                    + ' on ' + (item?.PrevDateCalculated | date:'mediumDate')
+                                                    + ' to ' + (item?.ExceedanceFraction | percent:'1.1-1')
+                                                    + ' (' + ((item?.Delta ?? 0) > 0 ? '+' : ((item?.Delta ?? 0) < 0 ? '−' : ''))
+                                                    + (((item?.Delta ?? 0) < 0 ? (-(item?.Delta ?? 0)) : (item?.Delta ?? 0)) | percent:'1.1-1') + ')')
+                                                 : 'No previous value'">
                               {{ item?.Trend === 'up' ? 'arrow_upward' : (item?.Trend === 'down' ? 'arrow_downward' : 'horizontal_rule') }}
                          </mat-icon>
-                         <span class="trend-delta"
-                               [style.color]="item?.Trend === 'up' ? '#dc2626' : (item?.Trend === 'down' ? '#16a34a' : 'inherit')">
-                              {{ (item?.Delta ?? 0) | percent:'1.1-1' }}
+                         <span class="trend-delta">
+                              {{ (item?.Delta ?? 0) > 0 ? '+' : ((item?.Delta ?? 0) < 0
+                                ? '−'
+                                : ''
+                                )
+                                }}&nbsp;{{
+                                ((item?.Delta
+                                ??
+                                0)
+                                <
+                                0
+                                ?
+                                (-(item?.Delta
+                                ??
+                                0))
+                                :
+                                (item?.Delta
+                                ??
+                                0))
+                                |
+                                percent:'1.1-1'
+                                }}
+                                </span>
                          </span>
-                    </ng-container>
                </ng-container>
                <ng-container *ngSwitchCase="'DateCalculated'">{{ value | date:'mediumDate' }}</ng-container>
                <ng-container *ngSwitchCase="'SampleDate'">{{ value | date:'mediumDate' }}</ng-container>
