@@ -10,7 +10,6 @@ import { MatIconModule } from '@angular/material/icon';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { MatButtonModule } from '@angular/material/button';
 import { EzColumn } from '../../models/ez-column.model';
-import { EzFormatPipe } from '../../pipes/ez-format.pipe';
 import { LiveAnnouncer } from '@angular/cdk/a11y';
 
 @Component({
@@ -23,7 +22,6 @@ import { LiveAnnouncer } from '@angular/cdk/a11y';
     MatIconModule,
     MatTooltipModule,
     MatButtonModule,
-    EzFormatPipe,
   ],
   templateUrl: './ez-table.component.html',
   styleUrl: './ez-table.component.scss'
