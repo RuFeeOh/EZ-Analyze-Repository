@@ -31,10 +31,12 @@ service cloud.firestore {
         && request.auth.uid in organizationResource.data.UserUids;
     }
     match /organizations/{organization} {
-      allow read: if isUserInOrganization(resource);
-      allow write: if isUserInOrganization(resource); 
-      allow delete: if isUserInOrganization(resource);
+      // Permit authenticated users to fetch a single organization document so UI can check membership
+      // without leaking entire collections. Listing remains restricted to members only.
+      allow get: if isLoggedIn();
+      allow list: if isUserInOrganization(resource);
       allow create: if isLoggedIn();
+      allow update, delete: if isUserInOrganization(resource);
     }
     // Legacy flat collection locked down (no access)
     match /exposureGroups/{exposureGroup} {

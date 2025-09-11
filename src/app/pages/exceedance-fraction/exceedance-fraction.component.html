@@ -35,6 +35,33 @@
              (click)="bucket.set(bucket() === 'bad' ? '' : 'bad')">
           ≥ 20%
      </button>
+     <div class="custom-threshold-wrapper"
+          style="display:inline-flex; align-items:center; gap:4px;">
+          <button type="button"
+                  class="ef-badge ef-custom"
+                  [class.active]="bucket() === 'custom'"
+                  [style.opacity]="bucket() && bucket() !== 'custom' ? 0.35 : 1"
+                  (click)="toggleCustomBucket()">
+               ≥ {{ (customThreshold() * 100) | number:'1.0-1' }}%
+          </button>
+          <button type="button"
+                  class="edit-custom-btn"
+                  (click)="beginEditCustom($event)"
+                  aria-label="Edit custom threshold">✎</button>
+          @if (editingCustom()) {
+          <span class="custom-edit-pop">
+               <input type="number"
+                      min="0"
+                      max="100"
+                      step="0.1"
+                      [value]="(customThreshold()*100) | number:'1.0-1'"
+                      (keydown.enter)="commitCustomThreshold($any($event.target).value)"
+                      (blur)="commitCustomThreshold($any($event.target).value)"
+                      style="width:60px; padding:2px 4px; font-size:12px;" />
+               <span style="font-size:11px; opacity:0.7; margin-left:4px;">%</span>
+          </span>
+          }
+     </div>
      <span style="opacity:0.7;">(lower is better)</span>
      <span style="opacity:0.7;">Trend: <mat-icon inline
                     style="vertical-align: middle; color:#dc2626;">arrow_upward</mat-icon> bad, <mat-icon inline

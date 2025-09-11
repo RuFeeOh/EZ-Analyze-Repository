@@ -36,8 +36,11 @@ export class ExceedanceFractionComponent {
   showLatest = signal(true);
   // Quick filter by Exposure Group
   filter = signal('');
-  // Legend bucket filter: '', 'good' (<5%), 'warn' (5-20%), 'bad' (>=20%)
-  bucket = signal<'' | 'good' | 'warn' | 'bad'>('');
+  // Legend bucket filter: '', 'good' (<5%), 'warn' (5-20%), 'bad' (>=20%), 'custom' (>= customThreshold)
+  bucket = signal<'' | 'good' | 'warn' | 'bad' | 'custom'>('');
+  // Custom threshold (fraction). Default 0.25 (25%). Editable via legend chip.
+  customThreshold = signal(0.25);
+  editingCustom = signal(false);
   private bucketFor(val: number | null | undefined): 'good' | 'warn' | 'bad' {
     const v = typeof val === 'number' ? val : 0;
     if (v < 0.05) return 'good';
@@ -159,12 +162,43 @@ export class ExceedanceFractionComponent {
     );
     // Wire filtered streams to react to both data and bucket changes
     const bucket$ = toObservable(this.bucket);
-    this.filteredEfItems$ = combineLatest([this.efItems$, bucket$]).pipe(
-      map(([items, b]) => (b ? items.filter(i => i?.EfBucket === b) : items))
+    this.filteredEfItems$ = combineLatest([this.efItems$, bucket$, toObservable(this.customThreshold)]).pipe(
+      map(([items, b, custom]) => {
+        if (!b) return items;
+        if (b === 'custom') return items.filter(i => (i?.ExceedanceFraction ?? 0) >= custom);
+        return items.filter(i => i?.EfBucket === b);
+      })
     );
-    this.filteredLatestEfItems$ = combineLatest([this.latestEfItems$, bucket$]).pipe(
-      map(([items, b]) => (b ? items.filter(i => i?.EfBucket === b) : items))
+    this.filteredLatestEfItems$ = combineLatest([this.latestEfItems$, bucket$, toObservable(this.customThreshold)]).pipe(
+      map(([items, b, custom]) => {
+        if (!b) return items;
+        if (b === 'custom') return items.filter(i => (i?.ExceedanceFraction ?? 0) >= custom);
+        return items.filter(i => i?.EfBucket === b);
+      })
     );
+  }
+
+  beginEditCustom(event: Event) {
+    event.stopPropagation();
+    this.editingCustom.set(true);
+    // Ensure custom bucket selected for immediate visual feedback
+    this.bucket.set('custom');
+  }
+
+  commitCustomThreshold(raw: any) {
+    let v = parseFloat(String(raw).trim());
+    if (!isNaN(v)) {
+      // If user enters a whole number > 1 treat as percent (e.g., 25 => 0.25)
+      if (v > 1) v = v / 100;
+      // Clamp between 0 and 1
+      v = Math.min(Math.max(v, 0), 1);
+      this.customThreshold.set(v);
+    }
+    this.editingCustom.set(false);
+  }
+
+  toggleCustomBucket() {
+    this.bucket.set(this.bucket() === 'custom' ? '' : 'custom');
   }
 
 }

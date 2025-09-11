@@ -27,6 +27,61 @@
     color: #7f1d1d;
 }
 
+/* Custom threshold chip inherits base badge look but with purple tone */
+.ef-custom {
+    background: #e9d5ff;
+    /* violet-200 */
+    color: #5b21b6;
+    /* violet-800 */
+    cursor: pointer;
+}
+
+.edit-custom-btn {
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    color: #e5e7eb;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 11px;
+    line-height: 1;
+    cursor: pointer;
+    transition: background 120ms ease, border-color 120ms ease;
+}
+
+.edit-custom-btn:hover {
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.edit-custom-btn:focus-visible {
+    outline: 2px solid #6366f1;
+    outline-offset: 2px;
+}
+
+.custom-edit-pop {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    background: #1f2937;
+    /* gray-800 */
+    padding: 4px 6px;
+    border-radius: 6px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.custom-edit-pop input {
+    background: #111827;
+    /* gray-900 */
+    border: 1px solid #374151;
+    /* gray-700 */
+    color: #f9fafb;
+    /* gray-50 */
+    border-radius: 4px;
+}
+
+.custom-edit-pop input:focus {
+    outline: 1px solid #6366f1;
+}
+
 .ef-badge:focus-visible {
     outline: 2px solid rgba(59, 130, 246, 0.6);
     outline-offset: 2px;
