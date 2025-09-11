@@ -1,4 +1,5 @@
-import { Component, inject, signal } from '@angular/core';
+import { Component, ElementRef, HostListener, ViewChild, inject, signal } from '@angular/core';
+import { FormsModule } from '@angular/forms';
 import { toObservable } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
 import { Firestore } from '@angular/fire/firestore';
@@ -9,6 +10,7 @@ import { MatTableModule } from '@angular/material/table';
 import { MatIconModule } from '@angular/material/icon';
 import { MatButtonModule } from '@angular/material/button';
 import { MatTooltipModule } from '@angular/material/tooltip';
+import { MatSliderModule } from '@angular/material/slider';
 import { MatSlideToggleModule } from '@angular/material/slide-toggle';
 import { EzTableComponent } from '../../features/ez-table/ez-table.component';
 import { SampleInfo } from '../../models/sample-info.model';
@@ -18,7 +20,7 @@ import { EzColumn } from '../../models/ez-column.model';
 
 @Component({
   selector: 'app-exceedance-fraction',
-  imports: [CommonModule, MatTableModule, MatIconModule, MatButtonModule, MatSlideToggleModule, MatTooltipModule, EzTableComponent],
+  imports: [CommonModule, FormsModule, MatTableModule, MatIconModule, MatButtonModule, MatSlideToggleModule, MatTooltipModule, MatSliderModule, EzTableComponent],
   templateUrl: './exceedance-fraction.component.html',
   styleUrl: './exceedance-fraction.component.scss'
 })
@@ -41,6 +43,7 @@ export class ExceedanceFractionComponent {
   // Custom threshold (fraction). Default 0.25 (25%). Editable via legend chip.
   customThreshold = signal(0.25);
   editingCustom = signal(false);
+  @ViewChild('customThresholdWrapper') customWrapperRef?: ElementRef<HTMLElement>;
   private bucketFor(val: number | null | undefined): 'good' | 'warn' | 'bad' {
     const v = typeof val === 'number' ? val : 0;
     if (v < 0.05) return 'good';
@@ -180,25 +183,59 @@ export class ExceedanceFractionComponent {
 
   beginEditCustom(event: Event) {
     event.stopPropagation();
+    if (this.editingCustom()) {
+      // Toggle off
+      this.editingCustom.set(false);
+      return;
+    }
     this.editingCustom.set(true);
-    // Ensure custom bucket selected for immediate visual feedback
     this.bucket.set('custom');
+  }
+
+  toggleEditCustom(event: Event) { this.beginEditCustom(event); }
+
+  private parseAndSetCustom(v: number) {
+    if (!isNaN(v)) {
+      if (v > 1) v = v / 100; // treat whole number as percent
+      v = Math.min(Math.max(v, 0), 1);
+      this.customThreshold.set(v);
+      // Keep custom bucket selected
+      if (this.bucket() !== 'custom') this.bucket.set('custom');
+    }
   }
 
   commitCustomThreshold(raw: any) {
     let v = parseFloat(String(raw).trim());
-    if (!isNaN(v)) {
-      // If user enters a whole number > 1 treat as percent (e.g., 25 => 0.25)
-      if (v > 1) v = v / 100;
-      // Clamp between 0 and 1
-      v = Math.min(Math.max(v, 0), 1);
-      this.customThreshold.set(v);
-    }
+    this.parseAndSetCustom(v);
     this.editingCustom.set(false);
+  }
+
+  updateCustomFromSlider(val: number) {
+    this.parseAndSetCustom(val / 100);
+  }
+
+  updateCustomFromInput(raw: any) {
+    let v = parseFloat(String(raw).trim());
+    this.parseAndSetCustom(v);
   }
 
   toggleCustomBucket() {
     this.bucket.set(this.bucket() === 'custom' ? '' : 'custom');
+  }
+
+  // Close editor when clicking outside
+  @HostListener('document:click', ['$event']) onDocumentClick(ev: MouseEvent) {
+    if (!this.editingCustom()) return;
+    const target = ev.target as HTMLElement | null;
+    if (!target) return;
+    // If click is inside the wrapper, ignore
+    if (this.customWrapperRef?.nativeElement.contains(target)) return;
+    this.editingCustom.set(false);
+  }
+
+  // Close on Escape
+  @HostListener('document:keydown.escape') onEscape() {
+    if (this.editingCustom()) this.editingCustom.set(false);
   }
 
 }
