@@ -136,126 +136,165 @@
 }
 
 /* --- Custom Threshold Editor (slider + input) --- */
-.custom-editor { 
-    display: flex; 
-    flex-direction: column; 
-    gap: 8px; 
-    min-width: 240px; 
-    padding: 6px 8px 8px; 
-    background: #1e293b; /* slate-800 */
-    border: 1px solid #334155; /* slate-700 */
-    border-radius: 8px; 
-    box-shadow: 0 6px 18px -2px rgba(0,0,0,0.55), 0 2px 4px rgba(0,0,0,0.4);
+.custom-editor {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 240px;
+    padding: 6px 8px 8px;
+    background: #1e293b;
+    /* slate-800 */
+    border: 1px solid #334155;
+    /* slate-700 */
+    border-radius: 8px;
+    box-shadow: 0 6px 18px -2px rgba(0, 0, 0, 0.55), 0 2px 4px rgba(0, 0, 0, 0.4);
 }
 
 /* Positioning wrapper so editor doesn't push legend layout */
-.custom-threshold-wrapper { position: relative; }
-.custom-threshold-wrapper .custom-edit-pop { position: absolute; top: 110%; left: 0; z-index: 30; }
+.custom-threshold-wrapper {
+    position: relative;
+}
+
+.custom-threshold-wrapper .custom-edit-pop {
+    position: absolute;
+    top: 110%;
+    left: 0;
+    z-index: 30;
+}
 
 /* Stabilize width of custom chip so number changes don't reflow siblings */
-.ef-badge.ef-custom { position: relative; display:inline-flex; align-items:center; gap:4px; font-variant-numeric: tabular-nums; }
-.ef-badge.ef-custom .value { display:inline-block; min-width: 34px; text-align:right; }
-.ef-badge.ef-custom .suffix { margin-left:1px; }
-
-.custom-row { 
-    display: flex; 
-    align-items: center; 
-    gap: 6px; 
-    font-size: 12px; 
-}
-.custom-row .label { 
-    font-weight: 500; 
-    opacity: 0.85; 
-    letter-spacing: .25px; 
+.ef-badge.ef-custom {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-variant-numeric: tabular-nums;
 }
 
-.threshold-input { 
-    background: #0f172a; /* slate-950 */
-    border: 1px solid #334155; 
-    color: #f1f5f9; 
-    border-radius: 4px; 
-    padding: 4px 6px; 
-    width: 70px; 
-    font-size: 12px; 
-    line-height: 1.2; 
-    transition: border-color 120ms ease, background 120ms ease; 
+.ef-badge.ef-custom .value {
+    display: inline-block;
+    min-width: 34px;
+    text-align: right;
 }
-.threshold-input:focus { 
-    outline: 1px solid #6366f1; 
-    border-color: #6366f1; 
+
+.ef-badge.ef-custom .suffix {
+    margin-left: 1px;
 }
+
+.custom-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+}
+
+.custom-row .label {
+    font-weight: 500;
+    opacity: 0.85;
+    letter-spacing: .25px;
+}
+
+.threshold-input {
+    background: #0f172a;
+    /* slate-950 */
+    border: 1px solid #334155;
+    color: #f1f5f9;
+    border-radius: 4px;
+    padding: 4px 6px;
+    width: 70px;
+    font-size: 12px;
+    line-height: 1.2;
+    transition: border-color 120ms ease, background 120ms ease;
+}
+
+.threshold-input:focus {
+    outline: 1px solid #6366f1;
+    border-color: #6366f1;
+}
+
 .threshold-input::-webkit-outer-spin-button,
-.threshold-input::-webkit-inner-spin-button { 
-    margin: 0; 
+.threshold-input::-webkit-inner-spin-button {
+    margin: 0;
 }
 
-.suffix { font-size: 11px; opacity: 0.65; }
-
-.slider-row { 
-    display: flex; 
-    align-items: center; 
-    gap: 10px; 
-    padding-top: 2px; 
+.suffix {
+    font-size: 11px;
+    opacity: 0.65;
 }
 
-.threshold-slider { 
-    flex: 1; 
-    --mdc-slider-handle-color: #6366f1; /* indigo-500 */
-    --mdc-slider-focus-handle-color: #818cf8; /* indigo-400 */
-    --mdc-slider-active-track-color: #6366f1; 
-    --mdc-slider-inactive-track-color: #334155; 
-    --mdc-slider-with-tick-marks-inactive-container-color: #334155; 
+.slider-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding-top: 2px;
 }
 
-.current-val { 
-    font-size: 11px; 
-    opacity: 0.7; 
-    width: 44px; 
-    text-align: right; 
+.threshold-slider {
+    flex: 1;
+    --mdc-slider-handle-color: #6366f1;
+    /* indigo-500 */
+    --mdc-slider-focus-handle-color: #818cf8;
+    /* indigo-400 */
+    --mdc-slider-active-track-color: #6366f1;
+    --mdc-slider-inactive-track-color: #334155;
+    --mdc-slider-with-tick-marks-inactive-container-color: #334155;
 }
 
-.actions { 
-    display: flex; 
-    justify-content: flex-end; 
-    gap: 4px; 
-}
-.actions button { 
-    background: rgba(255,255,255,0.06); 
-    border: 1px solid rgba(255,255,255,0.14); 
-    color: #e2e8f0; 
-    font-size: 11px; 
-    padding: 4px 8px; 
-    border-radius: 4px; 
-    cursor: pointer; 
-    line-height: 1.1; 
-    transition: background 120ms ease, border-color 120ms ease; 
-}
-.actions button:hover { 
-    background: rgba(255,255,255,0.12); 
-}
-.actions button:focus-visible { 
-    outline: 2px solid #6366f1; 
-    outline-offset: 2px; 
+.current-val {
+    font-size: 11px;
+    opacity: 0.7;
+    width: 44px;
+    text-align: right;
 }
 
-.close-btn { 
-    background: rgba(255,255,255,0.04); 
+.actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 4px;
 }
-.close-btn:hover { 
-    background: rgba(255,255,255,0.12); 
+
+.actions button {
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    color: #e2e8f0;
+    font-size: 11px;
+    padding: 4px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    line-height: 1.1;
+    transition: background 120ms ease, border-color 120ms ease;
+}
+
+.actions button:hover {
+    background: rgba(255, 255, 255, 0.12);
+}
+
+.actions button:focus-visible {
+    outline: 2px solid #6366f1;
+    outline-offset: 2px;
+}
+
+.close-btn {
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.close-btn:hover {
+    background: rgba(255, 255, 255, 0.12);
 }
 
 /* Smooth appear animation */
-.custom-editor { 
-    animation: popIn 160ms cubic-bezier(.4,0,.2,1); 
+.custom-editor {
+    animation: popIn 160ms cubic-bezier(.4, 0, .2, 1);
 }
-@keyframes popIn { 
-    from { 
-        transform: translateY(4px) scale(.98); 
-        opacity: 0; 
-    } 
-    to { 
-        transform: translateY(0) scale(1); 
-        opacity: 1; 
-    } 
+
+@keyframes popIn {
+    from {
+        transform: translateY(4px) scale(.98);
+        opacity: 0;
+    }
+
+    to {
+        transform: translateY(0) scale(1);
+        opacity: 1;
+    }
 }

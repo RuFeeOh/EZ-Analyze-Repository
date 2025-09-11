@@ -35,49 +35,55 @@
              (click)="bucket.set(bucket() === 'bad' ? '' : 'bad')">
           ≥ 20%
      </button>
-     <div class="custom-threshold-wrapper" #customThresholdWrapper
+     <div class="custom-threshold-wrapper"
+          #customThresholdWrapper
           style="display:inline-flex; align-items:center; gap:4px;">
-                           <button type="button"
-                              class="ef-badge ef-custom"
-                              [class.active]="bucket() === 'custom'"
-                              [style.opacity]="bucket() && bucket() !== 'custom' ? 0.35 : 1"
-                              (click)="toggleCustomBucket()">
-                         <span class="symbol">≥</span>
-                         <span class="value">{{ (customThreshold() * 100) | number:'1.1-1' }}</span><span class="suffix">%</span>
-                </button>
+          <button type="button"
+                  class="ef-badge ef-custom"
+                  [class.active]="bucket() === 'custom'"
+                  [style.opacity]="bucket() && bucket() !== 'custom' ? 0.35 : 1"
+                  (click)="toggleCustomBucket()">
+               <span class="symbol">≥</span>
+               <span class="value">{{ (customThreshold() * 100) | number:'1.1-1' }}</span><span class="suffix">%</span>
+          </button>
+          <button type="button"
+                  class="edit-custom-btn"
+                  (click)="toggleEditCustom($event)"
+                  aria-label="Edit custom threshold">{{ editingCustom() ? '✕' : '✎' }}</button>
+          @if (editingCustom()) {
+          <span class="custom-edit-pop">
+               <div class="custom-editor">
+                    <label class="custom-row">
+                         <span class="label">Threshold</span>
+                         <input type="number"
+                                min="0"
+                                max="100"
+                                step="0.1"
+                                inputmode="decimal"
+                                [value]="(customThreshold()*100) | number:'1.0-1'"
+                                (input)="updateCustomFromInput($any($event.target).value)"
+                                class="threshold-input" />
+                         <span class="suffix">%</span>
+                    </label>
+                    <div class="slider-row">
+                         <mat-slider min="0"
+                                     max="100"
+                                     step="0.5"
+                                     class="threshold-slider">
+                              <input matSliderThumb
+                                     [value]="customThreshold()*100"
+                                     (input)="updateCustomFromSlider($any($event.target).value)" />
+                         </mat-slider>
+                         <span class="current-val">{{ (customThreshold()*100) | number:'1.0-1' }}%</span>
+                    </div>
+                    <div class="actions">
                          <button type="button"
-                                             class="edit-custom-btn"
-                                             (click)="toggleEditCustom($event)"
-                                             aria-label="Edit custom threshold">{{ editingCustom() ? '✕' : '✎' }}</button>
-                         @if (editingCustom()) {
-                         <span class="custom-edit-pop">
-                                                        <div class="custom-editor">
-                                                             <label class="custom-row">
-                                                                  <span class="label">Threshold</span>
-                                                                  <input type="number"
-                                                                                     min="0"
-                                                                                     max="100"
-                                                                                     step="0.1"
-                                                                                     inputmode="decimal"
-                                                                                     [value]="(customThreshold()*100) | number:'1.0-1'"
-                                                                                     (input)="updateCustomFromInput($any($event.target).value)"
-                                                                                     class="threshold-input" />
-                                                                  <span class="suffix">%</span>
-                                                             </label>
-                                                             <div class="slider-row">
-                                                                  <mat-slider min="0" max="100" step="0.5" class="threshold-slider">
-                                                                       <input matSliderThumb
-                                                                                          [value]="customThreshold()*100"
-                                                                                          (input)="updateCustomFromSlider($any($event.target).value)" />
-                                                                  </mat-slider>
-                                                                  <span class="current-val">{{ (customThreshold()*100) | number:'1.0-1' }}%</span>
-                                                             </div>
-                                                             <div class="actions">
-                                                                  <button type="button" class="edit-custom-btn close-btn" (click)="editingCustom.set(false)">Close</button>
-                                                             </div>
-                                                        </div>
-                         </span>
-                         }
+                                 class="edit-custom-btn close-btn"
+                                 (click)="editingCustom.set(false)">Close</button>
+                    </div>
+               </div>
+          </span>
+          }
      </div>
      <span style="opacity:0.7;">(lower is better)</span>
      <span style="opacity:0.7;">Trend: <mat-icon inline
