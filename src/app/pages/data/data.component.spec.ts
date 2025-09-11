@@ -1,6 +1,7 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 
 import { DataComponent } from './data.component';
+import { commonTestProviders } from '../../../test/test-providers';
 
 describe('DataComponent', () => {
   let component: DataComponent;
@@ -8,9 +9,10 @@ describe('DataComponent', () => {
 
   beforeEach(async () => {
     await TestBed.configureTestingModule({
-      imports: [DataComponent]
+      imports: [DataComponent],
+      providers: [...commonTestProviders]
     })
-    .compileComponents();
+      .compileComponents();
 
     fixture = TestBed.createComponent(DataComponent);
     component = fixture.componentInstance;

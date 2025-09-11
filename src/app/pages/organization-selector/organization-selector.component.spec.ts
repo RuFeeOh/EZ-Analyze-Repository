@@ -1,6 +1,7 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 
-import { OrganizationSelectorComponent } from '../../services/organization/organization.service.spec';
+import { OrganizationSelectorComponent } from './organization-selector.component';
+import { commonTestProviders } from '../../../test/test-providers';
 
 describe('OrganizationSelectorComponent', () => {
   let component: OrganizationSelectorComponent;
@@ -8,7 +9,8 @@ describe('OrganizationSelectorComponent', () => {
 
   beforeEach(async () => {
     await TestBed.configureTestingModule({
-      imports: [OrganizationSelectorComponent]
+      imports: [OrganizationSelectorComponent],
+      providers: [...commonTestProviders]
     })
       .compileComponents();
 

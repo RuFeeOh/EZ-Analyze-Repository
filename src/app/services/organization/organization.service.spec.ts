@@ -1,6 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 
 import { OrganizationService } from './organization.service';
+import { commonTestProviders } from '../../../test/test-providers';
 import { CommonModule } from '@angular/common';
 import { Component, inject } from '@angular/core';
 import { Auth } from '@angular/fire/auth';
@@ -16,7 +17,9 @@ describe('OrganizationService', () => {
   let service: OrganizationService;
 
   beforeEach(() => {
-    TestBed.configureTestingModule({});
+    TestBed.configureTestingModule({
+      providers: [OrganizationService, ...commonTestProviders]
+    });
     service = TestBed.inject(OrganizationService);
   });
 

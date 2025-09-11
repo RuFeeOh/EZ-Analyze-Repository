@@ -16,6 +16,7 @@ import { EzTableComponent } from '../../features/ez-table/ez-table.component';
 import { SampleInfo } from '../../models/sample-info.model';
 import { Observable, combineLatest } from 'rxjs';
 import { map } from 'rxjs/operators';
+import { buildHistoryEfItems, buildLatestEfItems } from '../../utils/ef-items.util';
 import { EzColumn } from '../../models/ez-column.model';
 
 @Component({
@@ -70,99 +71,9 @@ export class ExceedanceFractionComponent {
       : collection(this.firestore, 'organizations/unknown/exposureGroups');
     this.exposureGroups$ = collectionData(ref as any, { idField: 'Uid' }).pipe(map(d => d as any[]));
 
-    // Build full history EF items (flattened) and sort desc by DateCalculated
-    this.efItems$ = this.exposureGroups$.pipe(
-      map(groups => (groups || []).flatMap(g => {
-        const name = g?.ExposureGroup ?? g?.Group ?? '';
-        const history = (g?.ExceedanceFractionHistory || []) as any[];
-        const historyAsc = history.slice().sort((a, b) => new Date(a?.DateCalculated || 0).getTime() - new Date(b?.DateCalculated || 0).getTime());
-        return historyAsc.map((ef, idx) => ({
-          Uid: `${name}__${ef?.DateCalculated || 'no-date'}__${idx}`,
-          ExposureGroup: name,
-          Agent: (() => {
-            const results = ef?.ResultsUsed ?? [];
-            if (Array.isArray(results) && results.length) {
-              const first = results.find((r: any) => !!r?.Agent)?.Agent;
-              return first ?? '';
-            }
-            return '';
-          })(),
-          OELNumber: ef?.OELNumber ?? (g?.LatestExceedanceFraction?.OELNumber ?? null),
-          ExceedanceFraction: ef?.ExceedanceFraction ?? 0,
-          EfBucket: this.bucketFor(ef?.ExceedanceFraction ?? 0),
-          DateCalculated: ef?.DateCalculated ?? '',
-          SamplesUsed: (ef?.ResultsUsed ?? []).length,
-          ResultsUsed: ef?.ResultsUsed ?? [],
-          PrevExceedanceFraction: (idx > 0 ? historyAsc[idx - 1]?.ExceedanceFraction ?? null : null),
-          PrevDateCalculated: (idx > 0 ? historyAsc[idx - 1]?.DateCalculated ?? '' : ''),
-          Trend: (() => {
-            if (idx === 0) return 'flat';
-            const prev = historyAsc[idx - 1]?.ExceedanceFraction ?? null;
-            const curr = ef?.ExceedanceFraction ?? null;
-            if (prev == null || curr == null) return 'flat';
-            if (curr > prev) return 'up';
-            if (curr < prev) return 'down';
-            return 'flat';
-          })(),
-          Delta: (() => {
-            if (idx === 0) return 0;
-            const prev = historyAsc[idx - 1]?.ExceedanceFraction ?? null;
-            const curr = ef?.ExceedanceFraction ?? null;
-            if (prev == null || curr == null) return 0;
-            return (curr - prev);
-          })(),
-        }));
-      }).sort((a, b) => new Date(b?.DateCalculated || 0).getTime() - new Date(a?.DateCalculated || 0).getTime()))
-    );
-
-    // Build latest EF items from each group's history; same shape as full history
-    this.latestEfItems$ = this.exposureGroups$.pipe(
-      map(groups => (groups || []).map(g => {
-        const name = g?.ExposureGroup ?? g?.Group ?? '';
-        const history = (g?.ExceedanceFractionHistory || []) as any[];
-        let latest = history
-          .slice()
-          .sort((a, b) => new Date(b?.DateCalculated || 0).getTime() - new Date(a?.DateCalculated || 0).getTime())[0];
-        if (!latest) {
-          latest = g?.LatestExceedanceFraction;
-        }
-        // Determine trend against immediate previous when available
-        let trend: 'up' | 'down' | 'flat' = 'flat';
-        let delta = 0;
-        if (history?.length >= 2) {
-          const sorted = history.slice().sort((a, b) => new Date(b?.DateCalculated || 0).getTime() - new Date(a?.DateCalculated || 0).getTime());
-          const curr = sorted[0]?.ExceedanceFraction ?? null;
-          const prev = sorted[1]?.ExceedanceFraction ?? null;
-          if (curr != null && prev != null) {
-            if (curr > prev) trend = 'up';
-            else if (curr < prev) trend = 'down';
-            delta = (curr - prev);
-          }
-        }
-        return {
-          Uid: `${name}__latest__${latest?.DateCalculated || 'no-date'}`,
-          ExposureGroup: name,
-          Agent: (() => {
-            const results = latest?.ResultsUsed ?? [];
-            if (Array.isArray(results) && results.length) {
-              const first = results.find((r: any) => !!r?.Agent)?.Agent;
-              return first ?? '';
-            }
-            return '';
-          })(),
-          OELNumber: latest?.OELNumber ?? (g?.LatestExceedanceFraction?.OELNumber ?? null),
-          ExceedanceFraction: latest?.ExceedanceFraction ?? 0,
-          EfBucket: this.bucketFor(latest?.ExceedanceFraction ?? 0),
-          DateCalculated: latest?.DateCalculated ?? '',
-          SamplesUsed: (latest?.ResultsUsed ?? []).length,
-          ResultsUsed: latest?.ResultsUsed ?? [],
-          Trend: trend,
-          Delta: delta,
-          PrevExceedanceFraction: (history?.length >= 2 ? (history.slice().sort((a, b) => new Date(b?.DateCalculated || 0).getTime() - new Date(a?.DateCalculated || 0).getTime())[1]?.ExceedanceFraction ?? null) : null),
-          PrevDateCalculated: (history?.length >= 2 ? (history.slice().sort((a, b) => new Date(b?.DateCalculated || 0).getTime() - new Date(a?.DateCalculated || 0).getTime())[1]?.DateCalculated ?? '') : ''),
-        };
-      }).sort((a, b) => new Date(b?.DateCalculated || 0).getTime() - new Date(a?.DateCalculated || 0).getTime()))
-    );
+    // Use pure utility functions (with internal memoization) to build items
+    this.efItems$ = this.exposureGroups$.pipe(map(groups => buildHistoryEfItems(groups as any)));
+    this.latestEfItems$ = this.exposureGroups$.pipe(map(groups => buildLatestEfItems(groups as any)));
     // Wire filtered streams to react to both data and bucket changes
     const bucket$ = toObservable(this.bucket);
     this.filteredEfItems$ = combineLatest([this.efItems$, bucket$, toObservable(this.customThreshold)]).pipe(
