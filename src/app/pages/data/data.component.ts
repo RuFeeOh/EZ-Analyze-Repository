@@ -21,7 +21,7 @@ import { SnackService } from '../../services/ui/snack.service';
 import { BehaviorSubject, firstValueFrom } from 'rxjs';
 import { AgentsDialogComponent } from './agents-dialog/agents-dialog.component';
 import { AgentService } from '../../services/agent/agent.service';
-
+import { ColumnMappingDialogComponent } from './column-mapping-dialog/column-mapping-dialog.component';
 @Component({
   selector: 'app-data',
   imports: [
@@ -93,56 +93,128 @@ export class DataComponent {
     const fileReader = new FileReader();
     fileReader.onload = (e: any) => {
       const workbook = read(e.target.result, { type: 'binary', cellDates: true });
-      const firstSheetName = workbook.SheetNames[0];
-      const worksheet = workbook.Sheets[firstSheetName];
-      this.parseAndValidateWorkbook(workbook, firstSheetName);
-      this.calculateExceedanceFraction();
+      const required = ['SampleDate', 'ExposureGroup', 'TWA'];
+      const sheetOptions = workbook.SheetNames.map(name => {
+        const headers = this.getSheetHeaders(workbook, name);
+        const mapping = this.computeAutoMapping(headers);
+        const recognized = Object.values(mapping).filter(v => !!v).length;
+        const requiredMatches = required.filter(r => !!mapping[r]).length;
+        const parsed = this.parseRows(workbook, name, mapping);
+        return { sheet: name, headers, mapping, recognized, requiredMatches, parsed };
+      });
+      // Choose default sheet: maximize requiredMatches then recognized then name
+      sheetOptions.sort((a, b) => {
+        if (b.requiredMatches !== a.requiredMatches) return b.requiredMatches - a.requiredMatches;
+        if (b.recognized !== a.recognized) return b.recognized - a.recognized;
+        return a.sheet.localeCompare(b.sheet);
+      });
+      const primary = sheetOptions[0];
+      if (!primary || primary.parsed.length === 0) {
+        this.excelData.set([]);
+        this.snackBar.open('No sheets contained recognizable data. Please check your file.', 'Dismiss', { duration: 6000, verticalPosition: 'top' });
+        return;
+      }
+      const dlgRef = this.dialog.open(ColumnMappingDialogComponent, {
+        data: {
+          sheetOptions: sheetOptions.map(s => ({ name: s.sheet, headers: s.headers, mapping: s.mapping, requiredMatches: s.requiredMatches, recognized: s.recognized })),
+          selected: primary.sheet,
+          required,
+          optional: ['SampleNumber', 'Agent', 'Notes']
+        }, width: '780px'
+      });
+      dlgRef.afterClosed().subscribe(result => {
+        if (!result) {
+          this.snackBar.open('Import canceled.', 'Dismiss', { duration: 3000, verticalPosition: 'top' });
+          return;
+        }
+        const chosenName = result.sheet || primary.sheet;
+        const chosen = sheetOptions.find(s => s.sheet === chosenName) || primary;
+        const finalMapping = result.mapping || chosen.mapping;
+        const reparsed = this.parseRows(workbook, chosen.sheet, finalMapping);
+        const stillMissing = required.filter(r => !finalMapping[r]);
+        if (stillMissing.length) {
+          this.snackBar.open('Missing required columns: ' + stillMissing.join(', '), 'Dismiss', { duration: 6000, verticalPosition: 'top' });
+          return;
+        }
+        this.excelData.set(reparsed);
+        this.calculateExceedanceFraction();
+      });
     };
     fileReader.readAsArrayBuffer(file);
 
   }
-  private parseAndValidateWorkbook(workbook: XLSX.WorkBook, sheetName: string) {
+  // Column mapping helpers
+  private getSheetHeaders(workbook: XLSX.WorkBook, sheetName: string): string[] {
+    const rows: any[][] = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1 });
+    if (!rows.length) return [];
+    return rows[0].map(h => (h == null ? '' : String(h).trim()));
+  }
+  private normalizeHeader(h: string): string {
+    return h.toLowerCase().replace(/[^a-z0-9]+/g, '');
+  }
+  private computeAutoMapping(headers: string[]): Record<string, string | null> {
+    if (!Array.isArray(headers)) headers = [];
+    const mapping: Record<string, string | null> = { SampleDate: null, ExposureGroup: null, TWA: null, SampleNumber: null, Agent: null, Notes: null };
+    const synonyms: Record<string, string[]> = {
+      SampleDate: ['sampledate', 'date', 'sampledt', 'samplingdate'],
+      ExposureGroup: ['exposuregroup', 'group', 'groupname', 'expgroup'],
+      TWA: ['twa', 'result', 'value', 'measurement'],
+      SampleNumber: ['samplenumber', 'sampleno', 'sample#', 'samplenum', 'sampleid', 'sample'],
+      Agent: ['agent', 'chemical', 'substance', 'analyte'],
+      Notes: ['notes', 'note', 'comment', 'comments', 'remarks', 'remark']
+    };
+    const normalizedHeaders = headers
+      .filter(h => h !== undefined && h !== null)
+      .map(h => {
+        try { return { raw: h, norm: this.normalizeHeader(String(h)) }; } catch { return { raw: String(h ?? ''), norm: '' }; }
+      })
+      .filter(h => h && typeof h.norm === 'string');
+
+    // Build reverse lookup from normalized header to original raw header
+    const lookup: Record<string, string> = {};
+    for (const entry of normalizedHeaders) {
+      if (!entry.norm) continue;
+      if (lookup[entry.norm] === undefined) lookup[entry.norm] = entry.raw; // keep first occurrence
+    }
+    for (const field of Object.keys(mapping)) {
+      const syns = synonyms[field] || [];
+      for (const syn of syns) {
+        if (lookup[syn] && !mapping[field]) {
+          mapping[field] = lookup[syn];
+          break;
+        }
+      }
+    }
+    return mapping;
+  }
+  private parseRows(workbook: XLSX.WorkBook, sheetName: string, mapping: Record<string, string | null>) {
     const rawRows: any[] = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { defval: '' });
-    const parsed: (SampleInfo & { __invalid?: boolean; __errors?: string[] })[] = rawRows.map((row, idx) => {
-      const errors: string[] = [];
-      const normalized: SampleInfo = new SampleInfo();
-      // SampleNumber (optional)
-      const sampleNumber = this.tryParseNumber(row['SampleNumber']);
-      normalized.SampleNumber = Number.isFinite(sampleNumber) ? (sampleNumber as number) : 0;
-
-      // ExposureGroup (required)
-      const exposureGroup = this.normalizeString(row['ExposureGroup']);
-      if (!exposureGroup) {
-        errors.push('ExposureGroup is required');
-      }
-      normalized.ExposureGroup = exposureGroup;
-
-      // TWA (required, numeric > 0)
-      const twa = this.tryParseNumber(row['TWA']);
-      if (!Number.isFinite(twa)) {
-        errors.push('TWA must be a number');
-      } else if ((twa as number) <= 0) {
-        errors.push('TWA must be > 0');
-      }
-      normalized.TWA = Number.isFinite(twa) ? (twa as number) : 0;
-
-      // SampleDate (required, robust parse, normalize to ISO)
-      const sampleDateRaw = row['SampleDate'];
-      const parsedDate = this.parseDate(sampleDateRaw);
-      if (!parsedDate) {
-        errors.push('SampleDate is required/invalid');
-      }
-      normalized.SampleDate = parsedDate ? parsedDate.toISOString() : '';
-
-      // Agent/Notes (optional)
-      normalized.Agent = this.normalizeString(row['Agent']);
-      normalized.Notes = this.normalizeString(row['Notes']);
-
-      const result = { ...(normalized as any), __invalid: errors.length > 0, __errors: errors } as SampleInfo & { __invalid?: boolean; __errors?: string[] };
-      return result;
-    });
-
-    this.excelData.set(parsed);
+    return rawRows.map(row => this.mapAndValidateRow(row, mapping));
+  }
+  private mapAndValidateRow(row: any, mapping: Record<string, string | null>): (SampleInfo & { __invalid?: boolean; __errors?: string[] }) {
+    const errors: string[] = [];
+    const normalized: SampleInfo = new SampleInfo();
+    const getVal = (field: string) => {
+      const header = mapping[field];
+      if (!header) return '';
+      return row[header];
+    };
+    const sampleNumber = this.tryParseNumber(getVal('SampleNumber'));
+    normalized.SampleNumber = Number.isFinite(sampleNumber) ? (sampleNumber as number) : 0;
+    const exposureGroup = this.normalizeString(getVal('ExposureGroup'));
+    if (!exposureGroup) errors.push('ExposureGroup is required');
+    normalized.ExposureGroup = exposureGroup;
+    const twaRaw = getVal('TWA');
+    const twa = this.tryParseNumber(twaRaw);
+    if (!Number.isFinite(twa)) { errors.push('TWA must be a number'); } else if ((twa as number) <= 0) { errors.push('TWA must be > 0'); }
+    normalized.TWA = Number.isFinite(twa) ? (twa as number) : 0;
+    const sampleDateRaw = getVal('SampleDate');
+    const parsedDate = this.parseDate(sampleDateRaw);
+    if (!parsedDate) errors.push('SampleDate is required/invalid');
+    normalized.SampleDate = parsedDate ? parsedDate.toISOString() : '';
+    normalized.Agent = this.normalizeString(getVal('Agent'));
+    normalized.Notes = this.normalizeString(getVal('Notes'));
+    return { ...(normalized as any), __invalid: errors.length > 0, __errors: errors };
   }
 
   calculateExceedanceFraction() {
