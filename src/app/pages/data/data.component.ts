@@ -22,6 +22,7 @@ import { BehaviorSubject, firstValueFrom } from 'rxjs';
 import { AgentsDialogComponent } from './agents-dialog/agents-dialog.component';
 import { AgentService } from '../../services/agent/agent.service';
 import { ColumnMappingDialogComponent } from './column-mapping-dialog/column-mapping-dialog.component';
+import { InvalidRowFixDialogComponent } from './invalid-row-fix-dialog/invalid-row-fix-dialog.component';
 @Component({
   selector: 'app-data',
   imports: [
@@ -67,6 +68,20 @@ export class DataComponent {
   totalCount = computed(() => this.excelData().length);
   validCount = computed(() => this.excelData().filter(r => !r.__invalid).length);
   invalidCellCount = computed(() => this.excelData().reduce((acc, r) => acc + ((r.__errors || []).length), 0));
+  // Display data with invalid rows first (stable order within groups)
+  displayData = computed(() => {
+    const rows = this.excelData();
+    return rows
+      .map((r, i) => ({ r, i }))
+      .sort((a, b) => {
+        // Priority: invalid (0), recently fixed (1), valid normal (2)
+        const rank = (x: any) => x.r.__invalid ? 0 : (x.r.__recentFixed ? 1 : 2);
+        const ra = rank(a); const rb = rank(b);
+        if (ra !== rb) return ra - rb;
+        return a.i - b.i;
+      })
+      .map(x => x.r);
+  });
   errorCounts = computed(() => {
     const counts: Record<string, number> = { ExposureGroup: 0, TWA: 0, SampleDate: 0 };
     for (const r of this.excelData()) {
@@ -309,6 +324,61 @@ export class DataComponent {
 
     const TWAlist: number[] = this.exposureGroupservice.getTWAListFromSampleInfo(this.excelData() as SampleInfo[]);
     this.exceedanceFraction = this.exceedanceFractionservice.calculateExceedanceProbability(TWAlist, 0.05);
+  }
+
+  openFixInvalidRows() {
+    const rows = this.excelData();
+    const invalid = rows
+      .map((r, i) => ({ ...r, index: i }))
+      .filter(r => r.__invalid);
+    if (!invalid.length) return;
+    const dlg = this.dialog.open(InvalidRowFixDialogComponent, { data: { rows: invalid }, width: '720px', maxHeight: '80vh' });
+    dlg.afterClosed().subscribe(result => {
+      if (!result) return;
+      const updated = [...this.excelData()].map(r => ({ ...r, __recentFixed: false }));
+      for (const edit of result) {
+        const idx = edit.index;
+        if (idx < 0 || idx >= updated.length) continue;
+        const current = { ...updated[idx] } as any;
+        // Apply fields if provided (allow zero values)
+        current.SampleDate = edit.SampleDate ? new Date(edit.SampleDate).toISOString() : '';
+        current.ExposureGroup = (edit.ExposureGroup || '').trim();
+        current.TWA = edit.TWA !== undefined && edit.TWA !== null && edit.TWA !== '' ? Number(edit.TWA) : undefined;
+        current.Agent = edit.Agent || current.Agent;
+        current.Notes = edit.Notes || current.Notes;
+        // Revalidate
+        const validated = this.validateExistingRow(current);
+        validated.__recentFixed = !validated.__invalid; // mark only if now valid
+        updated[idx] = validated as any;
+      }
+      this.excelData.set(updated as any);
+      this.calculateExceedanceFraction();
+    });
+  }
+
+  private validateExistingRow(row: any) {
+    const errors: string[] = [];
+    // ExposureGroup
+    if (!row.ExposureGroup) errors.push('ExposureGroup is required');
+    // TWA
+    if (row.TWA === undefined || row.TWA === null || row.TWA === '') {
+      errors.push('TWA is required');
+    } else if (typeof row.TWA !== 'number' || !isFinite(row.TWA)) {
+      errors.push('TWA must be a number');
+    } else if (row.TWA <= 0) {
+      errors.push('TWA must be > 0');
+    }
+    // SampleDate
+    let parsed: Date | null = null;
+    if (row.SampleDate) {
+      parsed = new Date(row.SampleDate);
+      if (isNaN(parsed.getTime())) parsed = null;
+    }
+    if (!parsed) errors.push('SampleDate is required/invalid');
+    row.SampleDate = parsed ? parsed.toISOString() : '';
+    row.__errors = errors;
+    row.__invalid = errors.length > 0;
+    return row;
   }
 
   async saveSampleInfo() {

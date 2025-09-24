@@ -41,6 +41,15 @@ th.mat-header-cell {
     }
 }
 
+.example-element-row.recent-fixed {
+    background: var(--mat-sys-on-primary);
+
+    /* medium purple */
+    td {
+        color: #e0d4ff;
+    }
+}
+
 .example-element-row td {
     border-bottom-width: 0;
 }

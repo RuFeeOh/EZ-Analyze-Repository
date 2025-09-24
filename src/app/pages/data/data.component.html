@@ -18,6 +18,14 @@
             <mat-icon>view_column</mat-icon>
             <span>Mapping</span>
         </button>
+        <button mat-stroked-button
+                color="warn"
+                *ngIf="hasInvalidRows()"
+                (click)="openFixInvalidRows()"
+                matTooltip="Edit only invalid rows inline">
+            <mat-icon>build</mat-icon>
+            <span>Fix Invalid</span>
+        </button>
         <button matButton="filled"
                 (click)="saveSampleInfo()"
                 [disabled]="validCount() === 0">
@@ -47,7 +55,7 @@
 
 
 <table mat-table
-       [dataSource]="excelData()"
+       [dataSource]="displayData()"
        multiTemplateDataRows
        class="mat-elevation-z8">
     @for (column of columnsToDisplay; track column) {
@@ -86,6 +94,7 @@
     <tr mat-row
         *matRowDef="let element; columns: columnsToDisplayWithExpand;"
         class="example-element-row"
-        [class.invalid-row]="element.__invalid">
+        [class.invalid-row]="element.__invalid"
+        [class.recent-fixed]="!element.__invalid && element.__recentFixed">
     </tr>
 </table>
