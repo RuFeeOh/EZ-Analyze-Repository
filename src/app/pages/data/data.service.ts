@@ -1,4 +1,6 @@
 import { Injectable, inject } from '@angular/core';
+import { MatDialog } from '@angular/material/dialog';
+import { AgentsDialogComponent } from './agents-dialog/agents-dialog.component';
 import { ExceedanceFractionService } from '../../services/exceedance-fraction/exceedance-fraction.service';
 import { ExposureGroupService } from '../../services/exposure-group/exposure-group.service';
 import { EfRecomputeTrackerService } from '../../services/exceedance-fraction/ef-recompute-tracker.service';
@@ -25,6 +27,7 @@ export class DataService {
     private auth = inject(Auth);
     private snackBar = inject(SnackService);
     private agentService = inject(AgentService);
+    private dialog = inject(MatDialog);
 
     calculateExceedanceFraction(rows: SampleInfo[]): number {
         const TWAlist: number[] = this.exposureGroupservice.getTWAListFromSampleInfo(rows);
@@ -54,7 +57,15 @@ export class DataService {
             try { const list$ = this.agentService.list(orgId); const list = await firstValueFrom(list$); existing = Object.fromEntries((list || []).map(a => [a.Name, a.OELNumber])); } catch { }
             const missing = allAgents.filter(a => existing[a] === undefined);
             if (missing.length) {
-                // Defer optional agent dialog to component layer if needed later
+                try {
+                    const dlgRef = this.dialog.open(AgentsDialogComponent, { data: { agents: missing, existing }, width: '520px' });
+                    const result = await dlgRef.afterClosed().toPromise();
+                    if (!result) { this.snackBar.open('Agent entry canceled.', 'Dismiss', { duration: 3000, verticalPosition: 'top' }); return; }
+                    for (const row of result) {
+                        if (!row?.Name) continue;
+                        try { await this.agentService.upsert(orgId, { Name: row.Name, OELNumber: Number(row.OELNumber) }); } catch { }
+                    }
+                } catch { }
             }
         }
         const grouped = this.exposureGroupservice.separateSampleInfoByExposureGroup(validRows);
