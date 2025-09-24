@@ -18,19 +18,17 @@
             <mat-icon>view_column</mat-icon>
             <span>Mapping</span>
         </button>
-        <button mat-stroked-button
-                color="warn"
+        <button matButton="filled"
+                (click)="saveSampleInfo()"
+                [disabled]="validCount() === 0 || hasInvalidRows()">
+            <mat-icon>save</mat-icon>
+            <span>Save</span>
+        </button><button matButton="tonal"
                 *ngIf="hasInvalidRows()"
                 (click)="openFixInvalidRows()"
                 matTooltip="Edit only invalid rows inline">
             <mat-icon>build</mat-icon>
             <span>Fix Invalid</span>
-        </button>
-        <button matButton="filled"
-                (click)="saveSampleInfo()"
-                [disabled]="validCount() === 0">
-            <mat-icon>save</mat-icon>
-            <span>Save</span>
         </button>
     </div>
     <div class="status"

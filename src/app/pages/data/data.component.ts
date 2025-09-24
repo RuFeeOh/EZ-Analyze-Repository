@@ -60,7 +60,7 @@ export class DataComponent {
   // Parsed + validated rows (SampleInfo with validation metadata)
   excelData = signal<(SampleInfo & { __invalid?: boolean; __errors?: string[] })[]>([]);
   exceedanceFraction!: number;
-  columnsToDisplay = ['SampleNumber', 'SampleDate', 'ExposureGroup', 'TWA'];
+  columnsToDisplay = ['SampleNumber', 'SampleDate', 'ExposureGroup', 'TWA', 'Agent'];
   columnsToDisplayWithExpand = [...this.columnsToDisplay, 'Errors'];
   expandedElement!: SampleInfo | null;
   invalidCount = computed(() => this.excelData().filter(r => r.__invalid).length);

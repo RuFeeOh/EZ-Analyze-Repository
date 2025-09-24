@@ -76,8 +76,22 @@ interface InvalidRowEditData {
 export class InvalidRowFixDialogComponent {
     edits = signal<any[]>([]);
     constructor(@Inject(MAT_DIALOG_DATA) public data: InvalidRowEditData, private ref: MatDialogRef<InvalidRowFixDialogComponent>) {
-        // Deep clone rows to avoid mutating until apply
-        const cloned = (data.rows || []).map(r => ({ ...r }));
+        // Deep clone rows and normalize SampleDate to yyyy-MM-dd for date input binding
+        const cloned = (data.rows || []).map(r => {
+            const copy: any = { ...r };
+            if (copy.SampleDate) {
+                try {
+                    const d = new Date(copy.SampleDate);
+                    if (!isNaN(d.getTime())) {
+                        const yyyy = d.getFullYear();
+                        const mm = String(d.getMonth() + 1).padStart(2, '0');
+                        const dd = String(d.getDate()).padStart(2, '0');
+                        copy.SampleDate = `${yyyy}-${mm}-${dd}`;
+                    }
+                } catch { /* ignore */ }
+            }
+            return copy;
+        });
         this.edits.set(cloned);
     }
     isValidAll() {
@@ -90,6 +104,19 @@ export class InvalidRowFixDialogComponent {
             return twaOk && expOk && dateOk;
         });
     }
-    apply() { this.ref.close(this.edits()); }
+    apply() {
+        // Convert date inputs (yyyy-MM-dd) back to ISO strings before returning
+        const out = this.edits().map(r => {
+            const copy = { ...r };
+            if (copy.SampleDate) {
+                try {
+                    const d = new Date(copy.SampleDate + 'T00:00:00');
+                    if (!isNaN(d.getTime())) copy.SampleDate = d.toISOString();
+                } catch { }
+            }
+            return copy;
+        });
+        this.ref.close(out);
+    }
     close() { this.ref.close(null); }
 }
