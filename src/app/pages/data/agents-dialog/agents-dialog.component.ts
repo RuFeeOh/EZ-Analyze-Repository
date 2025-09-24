@@ -55,7 +55,7 @@ type AgentRow = { Name: string; OELNumber: number };
   </div>
   <div mat-dialog-actions align="end">
     <button mat-button (click)="close()">Cancel</button>
-    <button mat-raised-button color="primary" (click)="save()">Save</button>
+    <button matButton="filled" (click)="save()">Save</button>
   </div>
   `,
 })

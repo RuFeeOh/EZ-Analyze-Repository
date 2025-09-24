@@ -30,26 +30,23 @@ interface MappingData {
     imports: [CommonModule, FormsModule, MatButtonModule, MatSelectModule, MatIconModule, MatTooltipModule],
     template: `
   <h2 mat-dialog-title>Map Columns</h2>
+  <div class="dialog-scroll" #scrollRoot>
   <div class="intro">
-    <p>We detected your sheet headers below. Map each required field. Leave optional fields unmapped if not present.</p>
     <div class="legend">
-      <span class="badge required">Required</span>
-      <span class="badge optional">Optional</span>
-      <span class="badge unmapped" *ngIf="unmappedCount() > 0">{{ unmappedCount() }} unmapped required</span>
+      <span class="badge unmapped" *ngIf="unmappedCount() > 0" matTooltip="Still need to map required fields">{{ unmappedCount() }} unmapped required</span>
+      <div class="spacer"></div>
+      <div class="sheet-toolbar" *ngIf="multiSheet">
+        <mat-select [(ngModel)]="selectedSheetName" (selectionChange)="onSheetChange()" class="sheet-dropdown" disableOptionCentering>
+          <mat-option *ngFor="let s of data.sheetOptions" [value]="s.name">{{ s.name }} ({{ s.requiredMatches }}/{{ data.required.length }} req)</mat-option>
+        </mat-select>
+        <button mat-icon-button class="remap-btn" matTooltip="Re-run auto mapping" (click)="remapCurrent()"><mat-icon>refresh</mat-icon></button>
+      </div>
     </div>
-  </div>
-  <div class="sheet-select" *ngIf="multiSheet">
-    <label for="sheetSel">Sheet</label>
-    <mat-select id="sheetSel" [(ngModel)]="selectedSheetName" (selectionChange)="onSheetChange()" class="sheet-dropdown">
-      <mat-option *ngFor="let s of data.sheetOptions" [value]="s.name">
-        {{ s.name }} — {{ s.requiredMatches }} req / {{ s.recognized }} total mapped
-      </mat-option>
-    </mat-select>
   </div>
   <div class="layout">
     <div class="pane form-pane">
       <div class="section">
-  <div class="section-title">Required Fields <span class="mini" *ngIf="currentOption">(auto: {{ currentOption.requiredMatches }}/{{ data.required.length }})</span></div>
+  <div class="section-title">Required Fields <span class="stat" *ngIf="currentOption" matTooltip="Auto matched required columns">{{ currentOption.requiredMatches }}/{{ data.required.length }}</span></div>
         <div class="field-grid">
           <div class="field-row" *ngFor="let field of data.required" [class.missing]="!localMapping[field]">
             <div class="label">{{ field }} <span class="req-indicator" *ngIf="!localMapping[field]">*</span></div>
@@ -61,7 +58,7 @@ interface MappingData {
         </div>
       </div>
       <div class="section">
-  <div class="section-title">Optional Fields <span class="mini" *ngIf="currentOption">(auto: {{ currentOption.recognized - currentOption.requiredMatches }})</span></div>
+  <div class="section-title">Optional Fields <span class="stat" *ngIf="currentOption" matTooltip="Recognized optional columns">{{ currentOption.recognized - currentOption.requiredMatches }}</span></div>
         <div class="field-grid optional">
           <div class="field-row" *ngFor="let field of data.optional">
             <div class="label">{{ field }}</div>
@@ -83,15 +80,21 @@ interface MappingData {
   </div>
   <div class="actions">
     <button mat-button (click)="close()">Cancel</button>
-    <button mat-raised-button color="primary" [disabled]="missingRequired()" (click)="confirm()">Continue</button>
+    <button matButton="filled" [disabled]="missingRequired()" (click)="confirm()">Continue</button>
+  </div>
   </div>
   `,
     styles: [`
-    :host { display:block; min-width:700px; max-width:960px; color:#f5f7fa; }
-    h2 { margin:0 0 .6rem; font-weight:600; color:#fafafa; }
+  :host { padding: 16px; display:block; width:100%; color:#f5f7fa; box-sizing:border-box; height:100%; }
+  h2 { margin:0 0 .65rem; font-weight:600; color:#fafafa; padding-right:12px; }
+  ::ng-deep .mat-mdc-dialog-surface { overflow:hidden; }
+  .dialog-scroll { overflow-y:auto; overflow-x:hidden; padding-right:4px; }
     .intro { margin-bottom: .6rem; }
     .intro p { margin:0 0 .55rem; font-size:13px; line-height:1.4; color:#d0d4d9; }
-    .legend { display:flex; gap:.5rem; flex-wrap:wrap; }
+  .legend { display:flex; gap:.5rem; flex-wrap:wrap; align-items:center; }
+  .legend .spacer { flex:1; }
+  .sheet-toolbar { display:flex; align-items:center; gap:.35rem; }
+  .remap-btn { width:36px; height:36px; line-height:36px; }
     .badge { font-size:11px; padding:2px 8px; border-radius:14px; background:#2f3742; color:#dde3ea; letter-spacing:.5px; text-transform:uppercase; font-weight:600; }
     .badge.required { background:#512da8; }
     .badge.optional { background:#05627a; }
@@ -99,12 +102,12 @@ interface MappingData {
   .sheet-select { display:flex; align-items:center; gap:.75rem; margin:.4rem 0 1rem; }
   .sheet-select label { font-size:12px; text-transform:uppercase; letter-spacing:.6px; color:#c5cad1; }
   .sheet-dropdown { width:260px; }
-  .layout { display:flex; gap:1.4rem; }
-    .pane { background:#181a1f; border:1px solid #2e3339; border-radius:12px; padding:1rem 1.15rem; position:relative; flex:1; min-height:320px; box-shadow:0 2px 4px rgba(0,0,0,.5), 0 0 0 1px rgba(255,255,255,.02) inset; }
+  .layout { display:flex; gap:1.4rem; min-width:0; }
+  .pane { background:#181a1f; border:1px solid #2e3339; border-radius:12px; padding:1rem 1.15rem; position:relative; flex:1; min-height:320px; box-shadow:0 2px 4px rgba(0,0,0,.5), 0 0 0 1px rgba(255,255,255,.02) inset; min-width:0; }
     .form-pane { flex:1.5; }
     .headers-pane { flex:1; display:flex; flex-direction:column; }
     .headers-title { font-size:12px; font-weight:600; text-transform:uppercase; letter-spacing:.6px; color:#c5cad1; margin-bottom:.55rem; }
-    .headers-list { display:flex; flex-wrap:wrap; gap:6px; overflow:auto; padding:4px 0; max-height:220px; }
+  .headers-list { display:flex; flex-wrap:wrap; gap:6px; overflow:auto; padding:4px 0; max-height:200px; }
     .header-chip { background:#242a31; padding:5px 9px; border-radius:8px; font-size:11px; line-height:1; border:1px solid #384048; color:#cdd3da; transition:background .15s, color .15s, border-color .15s; }
     .header-chip.mapped { background:#093a2f; border-color:#0fa97f; color:#b3ffe9; }
     .section { margin-bottom:1.35rem; }
@@ -120,10 +123,8 @@ interface MappingData {
     .select { width:100%; --mat-select-panel-background-color:#1e2429; }
     .mat-mdc-select-value, .mat-mdc-select-arrow { color:#e5e9ed !important; }
     .headers-pane .hint { margin-top:auto; font-size:11px; color:#8a939c; }
-    .actions { display:flex; justify-content:flex-end; gap:.85rem; margin-top:1.1rem; }
-    button[mat-raised-button][color='primary'] { background:#006f9c; }
-    button[mat-raised-button][color='primary']:hover { background:#0086bd; }
-    button[mat-raised-button][color='primary'][disabled] { background:#324954; color:#819199; }
+  .actions { display:flex; justify-content:flex-end; gap:.85rem; margin-top:1.1rem; padding:0 4px 6px; position:sticky; bottom:0; background:linear-gradient(to bottom, rgba(24,26,31,0), #181a1f 60%); }
+   
     @media (max-width:880px) { .layout { flex-direction:column; } .form-pane { flex:unset; }
       :host { min-width: unset; width:100%; }
     }
@@ -168,4 +169,38 @@ export class ColumnMappingDialogComponent {
     isMapped(header: string) { return Object.values(this.localMapping).includes(header); }
     close() { this.ref.close(); }
     confirm() { this.ref.close({ mapping: this.localMapping, sheet: this.selectedSheetName || (this.currentOption?.name) }); }
+
+    remapCurrent() {
+        if (!this.currentOption) return;
+        const headers = this.currentOption.headers || this.data.headers || [];
+        const lower = headers.map(h => h.toLowerCase());
+        const synonyms: Record<string, string[]> = {
+            SampleID: ['sample id', 'sampleid', 'id'],
+            SampleDate: ['sample date', 'date', 'sampledate', 'collection date'],
+            Analyte: ['analyte', 'substance', 'chemical'],
+            TWA: ['twa', 'time weighted average', 'twa value'],
+            Result: ['result', 'value', 'measurement'],
+            Unit: ['unit', 'units']
+        };
+        // Clear existing
+        for (const k of Object.keys(this.localMapping)) delete this.localMapping[k];
+        const used = new Set<string>();
+        const tryAssign = (target: string, variants: string[]) => {
+            for (const v of variants) {
+                const idx = lower.indexOf(v.toLowerCase());
+                if (idx !== -1 && !used.has(headers[idx])) {
+                    this.localMapping[target] = headers[idx];
+                    used.add(headers[idx]);
+                    return true;
+                }
+            }
+            return false;
+        };
+        for (const req of this.data.required) {
+            tryAssign(req, [req, ...(synonyms[req] || [])]);
+        }
+        for (const opt of this.data.optional) {
+            if (!this.localMapping[opt]) tryAssign(opt, [opt, ...(synonyms[opt] || [])]);
+        }
+    }
 }

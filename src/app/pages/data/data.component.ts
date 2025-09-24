@@ -49,6 +49,13 @@ export class DataComponent {
   private dialog = inject(MatDialog)
   private agentService = inject(AgentService)
   fileName = signal<string>('');
+  // Stored last mapping state for manual reopen
+  private lastWorkbook: XLSX.WorkBook | null = null;
+  private lastSheetOptions: { sheet: string; headers: string[]; mapping: Record<string, string | null>; recognized: number; requiredMatches: number; parsed: any[] }[] = [];
+  private lastRequired: string[] = [];
+  private lastOptional: string[] = [];
+  private lastSelectedSheet: string | null = null;
+  private lastFinalMapping: Record<string, string | null> | null = null;
   // Parsed + validated rows (SampleInfo with validation metadata)
   excelData = signal<(SampleInfo & { __invalid?: boolean; __errors?: string[] })[]>([]);
   exceedanceFraction!: number;
@@ -93,7 +100,9 @@ export class DataComponent {
     const fileReader = new FileReader();
     fileReader.onload = (e: any) => {
       const workbook = read(e.target.result, { type: 'binary', cellDates: true });
+      this.lastWorkbook = workbook;
       const required = ['SampleDate', 'ExposureGroup', 'TWA'];
+      const optional = ['SampleNumber', 'Agent', 'Notes'];
       const sheetOptions = workbook.SheetNames.map(name => {
         const headers = this.getSheetHeaders(workbook, name);
         const mapping = this.computeAutoMapping(headers);
@@ -114,13 +123,27 @@ export class DataComponent {
         this.snackBar.open('No sheets contained recognizable data. Please check your file.', 'Dismiss', { duration: 6000, verticalPosition: 'top' });
         return;
       }
+      // Persist state for potential reopen
+      this.lastSheetOptions = sheetOptions;
+      this.lastRequired = required;
+      this.lastOptional = optional;
+      this.lastSelectedSheet = primary.sheet;
+      this.lastFinalMapping = primary.mapping;
+
+      const allRequiredMapped = required.every(r => !!primary.mapping[r]);
+      if (allRequiredMapped) {
+        // Skip dialog, use primary mapping immediately
+        this.excelData.set(primary.parsed);
+        this.calculateExceedanceFraction();
+        return;
+      }
       const dlgRef = this.dialog.open(ColumnMappingDialogComponent, {
         data: {
           sheetOptions: sheetOptions.map(s => ({ name: s.sheet, headers: s.headers, mapping: s.mapping, requiredMatches: s.requiredMatches, recognized: s.recognized })),
           selected: primary.sheet,
           required,
-          optional: ['SampleNumber', 'Agent', 'Notes']
-        }, width: '780px'
+          optional
+        }, width: '60vw', maxWidth: '60vw', maxHeight: '75vh', panelClass: 'mapping-dialog-panel'
       });
       dlgRef.afterClosed().subscribe(result => {
         if (!result) {
@@ -137,11 +160,46 @@ export class DataComponent {
           return;
         }
         this.excelData.set(reparsed);
+        // Update last state
+        this.lastSelectedSheet = chosen.sheet;
+        this.lastFinalMapping = finalMapping;
         this.calculateExceedanceFraction();
       });
     };
     fileReader.readAsArrayBuffer(file);
 
+  }
+  openMappingDialog() {
+    if (!this.lastWorkbook || !this.lastSheetOptions.length) return;
+    const workbook = this.lastWorkbook;
+    const required = this.lastRequired;
+    const optional = this.lastOptional;
+    const sheetOptions = this.lastSheetOptions;
+    const primary = sheetOptions.find(s => s.sheet === (this.lastSelectedSheet || sheetOptions[0].sheet)) || sheetOptions[0];
+    const dlgRef = this.dialog.open(ColumnMappingDialogComponent, {
+      data: {
+        sheetOptions: sheetOptions.map(s => ({ name: s.sheet, headers: s.headers, mapping: s.mapping, requiredMatches: s.requiredMatches, recognized: s.recognized })),
+        selected: primary.sheet,
+        required,
+        optional
+      }, width: '60vw', height: '75vh', maxWidth: '60vw', maxHeight: '75vh', panelClass: 'mapping-dialog-panel'
+    });
+    dlgRef.afterClosed().subscribe(result => {
+      if (!result) return;
+      const chosenName = result.sheet || primary.sheet;
+      const chosen = sheetOptions.find(s => s.sheet === chosenName) || primary;
+      const finalMapping = result.mapping || chosen.mapping;
+      const reparsed = this.parseRows(workbook, chosen.sheet, finalMapping);
+      const stillMissing = required.filter(r => !finalMapping[r]);
+      if (stillMissing.length) {
+        this.snackBar.open('Missing required columns: ' + stillMissing.join(', '), 'Dismiss', { duration: 6000, verticalPosition: 'top' });
+        return;
+      }
+      this.excelData.set(reparsed);
+      this.lastSelectedSheet = chosen.sheet;
+      this.lastFinalMapping = finalMapping;
+      this.calculateExceedanceFraction();
+    });
   }
   // Column mapping helpers
   private getSheetHeaders(workbook: XLSX.WorkBook, sheetName: string): string[] {
@@ -185,6 +243,15 @@ export class DataComponent {
         }
       }
     }
+    // Fuzzy fallbacks for common variations if still unmapped
+    if (!mapping['TWA']) {
+      const fuzzy = headers.find(h => /twa|result|value/i.test(h || ''));
+      if (fuzzy) mapping['TWA'] = fuzzy;
+    }
+    if (!mapping['SampleDate']) {
+      const fuzzyDate = headers.find(h => /sample\s*date|date/i.test(h || ''));
+      if (fuzzyDate) mapping['SampleDate'] = fuzzyDate;
+    }
     return mapping;
   }
   private parseRows(workbook: XLSX.WorkBook, sheetName: string, mapping: Record<string, string | null>) {
@@ -196,18 +263,24 @@ export class DataComponent {
     const normalized: SampleInfo = new SampleInfo();
     const getVal = (field: string) => {
       const header = mapping[field];
-      if (!header) return '';
+      if (!header) return undefined;
       return row[header];
     };
     const sampleNumber = this.tryParseNumber(getVal('SampleNumber'));
-    normalized.SampleNumber = Number.isFinite(sampleNumber) ? (sampleNumber as number) : 0;
+    normalized.SampleNumber = Number.isFinite(sampleNumber) ? (sampleNumber as number) : undefined;
     const exposureGroup = this.normalizeString(getVal('ExposureGroup'));
     if (!exposureGroup) errors.push('ExposureGroup is required');
     normalized.ExposureGroup = exposureGroup;
     const twaRaw = getVal('TWA');
     const twa = this.tryParseNumber(twaRaw);
-    if (!Number.isFinite(twa)) { errors.push('TWA must be a number'); } else if ((twa as number) <= 0) { errors.push('TWA must be > 0'); }
-    normalized.TWA = Number.isFinite(twa) ? (twa as number) : 0;
+    if (twaRaw === undefined || twaRaw === '') {
+      errors.push('TWA is required');
+    } else if (!Number.isFinite(twa)) {
+      errors.push('TWA must be a number');
+    } else if ((twa as number) <= 0) {
+      errors.push('TWA must be > 0');
+    }
+    normalized.TWA = Number.isFinite(twa) ? (twa as number) : undefined;
     const sampleDateRaw = getVal('SampleDate');
     const parsedDate = this.parseDate(sampleDateRaw);
     if (!parsedDate) errors.push('SampleDate is required/invalid');

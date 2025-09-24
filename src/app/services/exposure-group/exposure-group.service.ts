@@ -153,7 +153,7 @@ export class ExposureGroupService {
       .forEach((sample) => {
         if (sample.TWA && +sample.TWA > 0) {
           TWAlist.push(+sample.TWA)
-        } else if (+sample.TWA === 0) {
+        } else if (+(sample.TWA ?? 0) === 0) {
           doesSampleInfoContainZero = true;
         }
 

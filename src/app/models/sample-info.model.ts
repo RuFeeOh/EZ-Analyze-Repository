@@ -1,9 +1,9 @@
 export class SampleInfo {
     Location: string = "";
-    SampleNumber: number = 0;
+    SampleNumber: number | undefined = 0;
     SampleDate: string = "";
     ExposureGroup: string = "";
     Agent: string = "";
-    TWA: number = 0;
+    TWA: number | undefined = 0;
     Notes: string = "";
 }

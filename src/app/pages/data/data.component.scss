@@ -33,6 +33,13 @@ th.mat-header-cell {
     white-space: nowrap;
 }
 
+.example-element-row.invalid-row {
+    background: var(--mat-sys-error-container);
+
+    td {
+        color: var(--mat-sys-error)
+    }
+}
 
 .example-element-row td {
     border-bottom-width: 0;
