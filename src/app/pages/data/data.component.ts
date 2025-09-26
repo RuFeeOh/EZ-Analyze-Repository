@@ -22,6 +22,8 @@ import { AgentService } from '../../services/agent/agent.service';
 import { ColumnMappingDialogComponent } from './column-mapping-dialog/column-mapping-dialog.component';
 import { UploadService, SheetOptionInfo } from './upload.service';
 import { DataService } from './data.service';
+import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
+import { MatProgressBarModule } from '@angular/material/progress-bar';
 @Component({
   selector: 'app-data',
   imports: [
@@ -33,6 +35,8 @@ import { DataService } from './data.service';
     MatChipsModule,
     MatTooltipModule,
     MatDialogModule,
+    MatProgressSpinnerModule,
+    MatProgressBarModule,
 
   ],
   templateUrl: './data.component.html',
@@ -51,6 +55,10 @@ export class DataComponent {
   private upload = inject(UploadService)
   private dataService = inject(DataService)
   fileName = signal<string>('');
+  // Loading state for file processing
+  isParsing = signal<boolean>(false);
+  parsePercent = signal<number | null>(null);
+  parseLabel = signal<string>('');
   // Stored last mapping state for manual reopen
   private lastWorkbook: any = null;
   private lastSheetOptions: SheetOptionInfo[] = [];
@@ -114,7 +122,15 @@ export class DataComponent {
     const file = event.target.files[0];
     if (!file) return;
     if (file.name) this.fileName.set(file.name);
-    const result = await this.upload.processFile(file);
+    this.isParsing.set(true);
+    this.parsePercent.set(0);
+    this.parseLabel.set('Reading file…');
+    const result = await this.upload.processFile(file, (p, label) => {
+      this.parsePercent.set(p);
+      if (label) this.parseLabel.set(label);
+    }).finally(() => {
+      this.isParsing.set(false);
+    });
     this.lastWorkbook = result.workbook;
     this.lastSheetOptions = result.sheetOptions;
     this.lastRequired = result.required;
@@ -139,12 +155,13 @@ export class DataComponent {
         optional: result.optional
       }, width: '60vw', maxWidth: '60vw', maxHeight: '75vh', panelClass: 'mapping-dialog-panel'
     });
-    dlgRef.afterClosed().subscribe(res => {
+    dlgRef.afterClosed().subscribe(async res => {
       if (!res) { this.snackBar.open('Import canceled.', 'Dismiss', { duration: 3000, verticalPosition: 'top' }); return; }
       const chosenName = res.sheet || result.primary.sheet;
       const chosen = result.sheetOptions.find(s => s.sheet === chosenName) || result.primary;
       const finalMapping = res.mapping || chosen.mapping;
-      const reparsed = this.upload.reparse(result.workbook, chosen.sheet, finalMapping);
+      // Use worker-based reparse if available to keep UI responsive
+      const reparsed = this.upload.reparseBuffered ? await this.upload.reparseBuffered(chosen.sheet, finalMapping) : this.upload.reparse(result.workbook, chosen.sheet, finalMapping);
       const stillMissing = result.required.filter(r => !finalMapping[r]);
       if (stillMissing.length) { this.snackBar.open('Missing required columns: ' + stillMissing.join(', '), 'Dismiss', { duration: 6000, verticalPosition: 'top' }); return; }
       this.excelData.set(reparsed as any);
@@ -168,12 +185,12 @@ export class DataComponent {
         optional
       }, width: '60vw', height: '75vh', maxWidth: '60vw', maxHeight: '75vh', panelClass: 'mapping-dialog-panel'
     });
-    dlgRef.afterClosed().subscribe(result => {
+    dlgRef.afterClosed().subscribe(async result => {
       if (!result) return;
       const chosenName = result.sheet || primary.sheet;
       const chosen = sheetOptions.find(s => s.sheet === chosenName) || primary;
       const finalMapping = result.mapping || chosen.mapping;
-      const reparsed = this.upload.reparse(workbook, chosen.sheet, finalMapping);
+      const reparsed = this.upload.reparseBuffered ? await this.upload.reparseBuffered(chosen.sheet, finalMapping) : this.upload.reparse(workbook, chosen.sheet, finalMapping);
       const stillMissing = required.filter(r => !finalMapping[r]);
       if (stillMissing.length) {
         this.snackBar.open('Missing required columns: ' + stillMissing.join(', '), 'Dismiss', { duration: 6000, verticalPosition: 'top' });

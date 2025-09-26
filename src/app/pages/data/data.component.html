@@ -96,3 +96,18 @@
         [class.recent-fixed]="!element.__invalid && element.__recentFixed">
     </tr>
 </table>
+
+<!-- Parsing overlay -->
+<div class="overlay"
+     *ngIf="isParsing()">
+    <div class="overlay-card">
+        <mat-progress-spinner *ngIf="parsePercent() === null"
+                              mode="indeterminate"
+                              diameter="42"></mat-progress-spinner>
+        <mat-progress-bar *ngIf="parsePercent() !== null"
+                          mode="determinate"
+                          [value]="parsePercent() || 0"></mat-progress-bar>
+        <div class="overlay-label">{{ parseLabel() || 'Processing…' }}</div>
+    </div>
+
+</div>

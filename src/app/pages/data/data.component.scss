@@ -6,6 +6,33 @@ table {
     width: 100%;
 }
 
+.overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.35);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+}
+
+.overlay-card {
+    background: var(--mat-sys-surface);
+    color: var(--mat-sys-on-surface);
+    padding: 20px 24px;
+    border-radius: 8px;
+    min-width: 280px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+    display: grid;
+    gap: 12px;
+    justify-items: center;
+}
+
+.overlay-label {
+    font-size: 14px;
+    opacity: 0.85;
+}
+
 .toolbar {
     display: grid;
     grid-template-columns: 1fr auto auto;
