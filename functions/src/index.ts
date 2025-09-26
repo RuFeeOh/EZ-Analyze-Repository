@@ -175,9 +175,8 @@ function computeDiff(before: any, after: any) {
     function summarizeValue(v: any) {
         if (Array.isArray(v)) {
             return {
-                _type: 'array',
-                length: v.length,
-                preview: v.slice(0, Math.min(1, v.length)),
+                _type: "array",
+                latest: v.slice(0, Math.min(1, v.length)),
             };
         }
         return v;
@@ -192,8 +191,8 @@ function computeDiff(before: any, after: any) {
             _type: 'array',
             beforeLength: Array.isArray(bArr) ? bArr.length : undefined,
             afterLength: Array.isArray(aArr) ? aArr.length : undefined,
-            previewBefore: Array.isArray(bArr) ? bArr.slice(0, Math.min(1, bArr.length)) : undefined,
-            previewAfter: Array.isArray(aArr) ? aArr.slice(0, Math.min(1, aArr.length)) : undefined,
+            latestBefore: Array.isArray(bArr) ? bArr.slice(0, Math.min(1, bArr.length)) : undefined,
+            latestAfter: Array.isArray(aArr) ? aArr.slice(0, Math.min(1, aArr.length)) : undefined,
         };
     }
 
@@ -228,7 +227,7 @@ function computeDiff(before: any, after: any) {
     return diffObjects(before || {}, after || {});
 }
 
-const RETENTION_DAYS = parseInt(process.env.AUDIT_TTL_DAYS || '365', 10);
+const RETENTION_DAYS = parseInt(process.env.AUDIT_TTL_DAYS || '365', 10) * 2;
 
 async function writeAudit(orgId: string, collection: string, docId: string, before: any, after: any) {
     const db = getFirestore();
