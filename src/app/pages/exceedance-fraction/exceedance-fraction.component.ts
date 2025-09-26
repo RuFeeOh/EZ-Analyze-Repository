@@ -11,6 +11,7 @@ import { MatIconModule } from '@angular/material/icon';
 import { MatButtonModule } from '@angular/material/button';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { MatSliderModule } from '@angular/material/slider';
+import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatSlideToggleModule } from '@angular/material/slide-toggle';
 import { EzTableComponent } from '../../features/ez-table/ez-table.component';
 import { SampleInfo } from '../../models/sample-info.model';
@@ -21,7 +22,7 @@ import { EzColumn } from '../../models/ez-column.model';
 
 @Component({
   selector: 'app-exceedance-fraction',
-  imports: [CommonModule, FormsModule, MatTableModule, MatIconModule, MatButtonModule, MatSlideToggleModule, MatTooltipModule, MatSliderModule, EzTableComponent],
+  imports: [CommonModule, FormsModule, MatTableModule, MatIconModule, MatButtonModule, MatSlideToggleModule, MatTooltipModule, MatSliderModule, MatProgressSpinnerModule, EzTableComponent],
   templateUrl: './exceedance-fraction.component.html',
   styleUrl: './exceedance-fraction.component.scss'
 })

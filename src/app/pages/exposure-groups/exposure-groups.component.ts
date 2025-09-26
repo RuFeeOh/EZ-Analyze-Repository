@@ -5,12 +5,13 @@ import { collection } from 'firebase/firestore';
 import { collectionData } from '@angular/fire/firestore';
 import { OrganizationService } from '../../services/organization/organization.service';
 import { EzTableComponent } from '../../features/ez-table/ez-table.component';
+import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { Observable } from 'rxjs';
 import { map } from 'rxjs/operators';
 
 @Component({
     selector: 'app-exposure-groups',
-    imports: [CommonModule, EzTableComponent],
+    imports: [CommonModule, MatProgressSpinnerModule, EzTableComponent],
     templateUrl: './exposure-groups.component.html',
     styleUrl: './exposure-groups.component.scss'
 })

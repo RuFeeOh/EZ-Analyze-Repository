@@ -7,7 +7,17 @@
     </label>
 </div> -->
 
-<ez-table [items]="(exposureGroups$ | async) ?? []"
+@let groups = (exposureGroups$ | async);
+
+<div class="page-loading"
+     *ngIf="!groups || groups.length === 0"
+     style="display:flex; align-items:center; justify-content:center; height: 40vh;">
+    <mat-progress-spinner mode="indeterminate"
+                          diameter="48"></mat-progress-spinner>
+</div>
+
+<ez-table *ngIf="groups && groups.length > 0"
+          [items]="groups"
           [summaryColumns]="[
 		{ Name: 'ExposureGroup', DisplayName: 'Exposure Group' },
         { Name: 'ResultsTotalCount', DisplayName: 'Samples' }

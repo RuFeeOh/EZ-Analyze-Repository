@@ -92,80 +92,92 @@
 
 </div>
 
-<ez-table [items]="(showLatest() ? (filteredLatestEfItems$ | async) : (filteredEfItems$ | async)) ?? []"
-          [summaryColumns]="efSummaryColumns"
-          [detailColumns]="efDetailColumns"
-          [detailFor]="efDetailForItem"
-          [filterText]="filter()"
-          filterKey="ExposureGroup"
-          defaultSortActive="ExposureGroup"
-          defaultSortDirection="asc">
-     <ng-template #cell
-                  let-item
-                  let-col="column"
-                  let-id="id"
-                  let-section="section"
-                  let-value="value">
-          <ng-container [ngSwitch]="id">
-               <ng-container *ngSwitchCase="'ExceedanceFraction'">
-                    <span class="ef-badge"
-                          [class.ef-good]="(value ?? 0) < 0.05"
-                          [class.ef-warn]="(value ?? 0) >= 0.05 && (value ?? 0) < 0.2"
-                          [class.ef-bad]="(value ?? 0) >= 0.2">
-                         {{ (value ?? 0) | percent:'1.1-1' }}
-                    </span>
-               </ng-container>
-               <ng-container *ngSwitchCase="'Trend'">
-                    <span class="trend"
-                          [class.trend-up]="item?.Trend === 'up'"
-                          [class.trend-down]="item?.Trend === 'down'"
-                          [class.trend-flat]="item?.Trend !== 'up' && item?.Trend !== 'down'">
-                         <mat-icon inline
-                                   [matTooltip]="(item?.PrevExceedanceFraction != null && item?.ExceedanceFraction != null)
+@let efItems = (showLatest() ? (filteredLatestEfItems$ | async) : (filteredEfItems$ | async));
+
+<div class="table-wrapper"
+     style="position:relative;">
+     <div class="spinner-overlay"
+          *ngIf="!efItems"
+          style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; z-index: 2;">
+          <mat-progress-spinner mode="indeterminate"
+                                diameter="48"></mat-progress-spinner>
+     </div>
+
+     <ez-table [items]="efItems ?? []"
+               [summaryColumns]="efSummaryColumns"
+               [detailColumns]="efDetailColumns"
+               [detailFor]="efDetailForItem"
+               [filterText]="filter()"
+               filterKey="ExposureGroup"
+               defaultSortActive="ExposureGroup"
+               defaultSortDirection="asc">
+          <ng-template #cell
+                       let-item
+                       let-col="column"
+                       let-id="id"
+                       let-section="section"
+                       let-value="value">
+               <ng-container [ngSwitch]="id">
+                    <ng-container *ngSwitchCase="'ExceedanceFraction'">
+                         <span class="ef-badge"
+                               [class.ef-good]="(value ?? 0) < 0.05"
+                               [class.ef-warn]="(value ?? 0) >= 0.05 && (value ?? 0) < 0.2"
+                               [class.ef-bad]="(value ?? 0) >= 0.2">
+                              {{ (value ?? 0) | percent:'1.1-1' }}
+                         </span>
+                    </ng-container>
+                    <ng-container *ngSwitchCase="'Trend'">
+                         <span class="trend"
+                               [class.trend-up]="item?.Trend === 'up'"
+                               [class.trend-down]="item?.Trend === 'down'"
+                               [class.trend-flat]="item?.Trend !== 'up' && item?.Trend !== 'down'">
+                              <mat-icon inline
+                                        [matTooltip]="(item?.PrevExceedanceFraction != null && item?.ExceedanceFraction != null)
                                                  ? ('From ' + (item?.PrevExceedanceFraction | percent:'1.1-1')
                                                     + ' on ' + (item?.PrevDateCalculated | date:'mediumDate')
                                                     + ' to ' + (item?.ExceedanceFraction | percent:'1.1-1')
                                                     + ' (' + ((item?.Delta ?? 0) > 0 ? '+' : ((item?.Delta ?? 0) < 0 ? '−' : ''))
                                                     + (((item?.Delta ?? 0) < 0 ? (-(item?.Delta ?? 0)) : (item?.Delta ?? 0)) | percent:'1.1-1') + ')')
                                                  : 'No previous value'"
-                                   [attr.aria-label]="(item?.PrevExceedanceFraction != null && item?.ExceedanceFraction != null)
+                                        [attr.aria-label]="(item?.PrevExceedanceFraction != null && item?.ExceedanceFraction != null)
                                                  ? ('From ' + (item?.PrevExceedanceFraction | percent:'1.1-1')
                                                     + ' on ' + (item?.PrevDateCalculated | date:'mediumDate')
                                                     + ' to ' + (item?.ExceedanceFraction | percent:'1.1-1')
                                                     + ' (' + ((item?.Delta ?? 0) > 0 ? '+' : ((item?.Delta ?? 0) < 0 ? '−' : ''))
                                                     + (((item?.Delta ?? 0) < 0 ? (-(item?.Delta ?? 0)) : (item?.Delta ?? 0)) | percent:'1.1-1') + ')')
                                                  : 'No previous value'">
-                              {{ item?.Trend === 'up' ? 'arrow_upward' : (item?.Trend === 'down' ? 'arrow_downward' : 'horizontal_rule') }}
-                         </mat-icon>
-                         <span class="trend-delta">
-                              {{ (item?.Delta ?? 0) > 0 ? '+' : ((item?.Delta ?? 0) < 0
-                                ? '−'
-                                : ''
-                                )
-                                }}&nbsp;{{
-                                ((item?.Delta
-                                ??
-                                0)
-                                <
-                                0
-                                ?
-                                (-(item?.Delta
-                                ??
-                                0))
-                                :
-                                (item?.Delta
-                                ??
-                                0))
-                                |
-                                percent:'1.1-1'
-                                }}
-                                </span>
-                         </span>
+                                   {{ item?.Trend === 'up' ? 'arrow_upward' : (item?.Trend === 'down' ? 'arrow_downward' : 'horizontal_rule') }}
+                              </mat-icon>
+                              <span class="trend-delta">
+                                   {{ (item?.Delta ?? 0) > 0 ? '+' : ((item?.Delta ?? 0) < 0
+                                     ? '−'
+                                     : ''
+                                     )
+                                     }}&nbsp;{{
+                                     ((item?.Delta
+                                     ??
+                                     0)
+                                     <
+                                     0
+                                     ?
+                                     (-(item?.Delta
+                                     ??
+                                     0))
+                                     :
+                                     (item?.Delta
+                                     ??
+                                     0))
+                                     |
+                                     percent:'1.1-1'
+                                     }}
+                                     </span>
+                              </span>
+                    </ng-container>
+                    <ng-container *ngSwitchCase="'DateCalculated'">{{ value | date:'mediumDate' }}</ng-container>
+                    <ng-container *ngSwitchCase="'SampleDate'">{{ value | date:'mediumDate' }}</ng-container>
+                    <ng-container *ngSwitchCase="'TWA'">{{ value | number:'1.3-3' }}</ng-container>
+                    <ng-container *ngSwitchDefault>{{ value }}</ng-container>
                </ng-container>
-               <ng-container *ngSwitchCase="'DateCalculated'">{{ value | date:'mediumDate' }}</ng-container>
-               <ng-container *ngSwitchCase="'SampleDate'">{{ value | date:'mediumDate' }}</ng-container>
-               <ng-container *ngSwitchCase="'TWA'">{{ value | number:'1.3-3' }}</ng-container>
-               <ng-container *ngSwitchDefault>{{ value }}</ng-container>
-          </ng-container>
-     </ng-template>
-</ez-table>
+          </ng-template>
+     </ez-table>
+</div>

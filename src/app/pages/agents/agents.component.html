@@ -8,7 +8,17 @@
     </button>
 </div>
 
-<ez-table [items]="(agents$ | async) ?? []"
+@let agents = (agents$ | async);
+
+<div class="page-loading"
+     *ngIf="!agents || agents.length === 0"
+     style="display:flex; align-items:center; justify-content:center; height: 40vh;">
+    <mat-progress-spinner mode="indeterminate"
+                          diameter="48"></mat-progress-spinner>
+</div>
+
+<ez-table *ngIf="agents && agents.length > 0"
+          [items]="agents"
           [keyFor]="keyForAgent"
           [summaryColumns]="[
             { Name: 'Name', DisplayName: 'Name' },

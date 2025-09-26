@@ -12,6 +12,7 @@ import { collectionData } from '@angular/fire/firestore';
 import { Observable, combineLatest, map } from 'rxjs';
 import { NewAgentDialogComponent } from '../agents/new-agent-dialog.component';
 import { EzTableComponent } from '../../features/ez-table/ez-table.component';
+import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 
 interface AgentView {
     Name: string;
@@ -23,7 +24,7 @@ interface AgentView {
 @Component({
     selector: 'app-agents',
     standalone: true,
-    imports: [CommonModule, MatButtonModule, MatIconModule, MatDialogModule, EzTableComponent],
+    imports: [CommonModule, MatButtonModule, MatIconModule, MatDialogModule, MatProgressSpinnerModule, EzTableComponent],
     templateUrl: './agents.component.html',
     styleUrl: './agents.component.scss',
 })
