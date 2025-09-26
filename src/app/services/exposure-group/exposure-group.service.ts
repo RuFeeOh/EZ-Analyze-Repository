@@ -1,10 +1,11 @@
 import { inject, Injectable } from '@angular/core';
-import { collection, doc, runTransaction } from 'firebase/firestore';
+import { collection, doc, runTransaction, serverTimestamp } from 'firebase/firestore';
 import { SampleInfo } from '../../models/sample-info.model';
 import { Firestore } from '@angular/fire/firestore';
 import { ExposureGroup } from '../../models/exposure-group.model';
 import { ExceedanceFraction } from '../../models/exceedance-fraction.model';
 import { ExceedanceFractionService } from '../exceedance-fraction/exceedance-fraction.service';
+import { Auth } from '@angular/fire/auth';
 
 
 @Injectable({
@@ -13,8 +14,25 @@ import { ExceedanceFractionService } from '../exceedance-fraction/exceedance-fra
 export class ExposureGroupService {
   private firestore = inject(Firestore);
   private exceedanceFractionservice = inject(ExceedanceFractionService)
+  private auth = inject(Auth);
 
   constructor() { }
+
+  /**
+   * Remove transient UI/validation fields from SampleInfo rows before persisting.
+   * Keeps only the known SampleInfo fields.
+   */
+  private sanitizeRows(rows: SampleInfo[] = []): SampleInfo[] {
+    return (rows || []).map((r: any) => ({
+      Location: r?.Location ?? "",
+      SampleNumber: r?.SampleNumber,
+      SampleDate: r?.SampleDate ?? "",
+      ExposureGroup: r?.ExposureGroup ?? "",
+      Agent: r?.Agent ?? "",
+      TWA: r?.TWA,
+      Notes: r?.Notes ?? "",
+    }));
+  }
 
   async saveSampleInfo(sampleInfo: SampleInfo[], organizationUid: string, organizationName: string) {
     try {
@@ -25,13 +43,16 @@ export class ExposureGroupService {
       const docRef = doc(colRef, docId);
 
       // Upsert using a transaction to atomically concatenate results
+      const uid = this.auth.currentUser?.uid || 'unknown';
       await runTransaction(this.firestore, async (tx) => {
         const snap = await tx.get(docRef as any);
         const existingData: any = snap.exists() ? (snap.data() || {}) : {};
         const existingResults: SampleInfo[] = (existingData?.Results ?? []) as SampleInfo[];
-
-        // Merge results first; EF will be recomputed on the server via Cloud Function
-        const updatedResults: SampleInfo[] = [...existingResults, ...sampleInfo];
+        // Sanitize both existing and incoming rows to avoid saving transient fields
+        const updatedResults: SampleInfo[] = [
+          ...this.sanitizeRows(existingResults),
+          ...this.sanitizeRows(sampleInfo),
+        ];
 
         if (!snap.exists()) {
           // Create new document WITHOUT EF fields (server computes them)
@@ -40,7 +61,11 @@ export class ExposureGroupService {
             OrganizationName: organizationName,
             Group: groupName,
             ExposureGroup: groupName,
-            Results: JSON.parse(JSON.stringify(updatedResults))
+            Results: JSON.parse(JSON.stringify(updatedResults)),
+            createdAt: serverTimestamp(),
+            createdBy: uid,
+            updatedAt: serverTimestamp(),
+            updatedBy: uid,
           };
           tx.set(docRef as any, payload as any);
         } else {
@@ -52,6 +77,8 @@ export class ExposureGroupService {
             OrganizationName: organizationName,
             Group: groupName,
             ExposureGroup: groupName,
+            updatedAt: serverTimestamp(),
+            updatedBy: uid,
           });
         }
       });
@@ -73,6 +100,7 @@ export class ExposureGroupService {
     const entries = Object.entries(groups || {}).filter(([_, arr]) => (arr?.length ?? 0) > 0);
     if (entries.length === 0) return [];
 
+    const uid = this.auth.currentUser?.uid || 'unknown';
     const result = await runTransaction(this.firestore, async (tx) => {
       const saved: { id: string, groupName: string }[] = [];
 
@@ -89,7 +117,10 @@ export class ExposureGroupService {
       // Pass 2: Compute updates and write (EF fields updated server-side)
       for (const d of docs) {
         const existingResults: SampleInfo[] = (d.existingData?.Results ?? []) as SampleInfo[];
-        const updatedResults: SampleInfo[] = [...existingResults, ...d.samples];
+        const updatedResults: SampleInfo[] = [
+          ...this.sanitizeRows(existingResults),
+          ...this.sanitizeRows(d.samples),
+        ];
 
         if (!d.snap.exists()) {
           const payload = {
@@ -97,7 +128,11 @@ export class ExposureGroupService {
             OrganizationName: organizationName,
             Group: d.groupName,
             ExposureGroup: d.groupName,
-            Results: JSON.parse(JSON.stringify(updatedResults))
+            Results: JSON.parse(JSON.stringify(updatedResults)),
+            createdAt: serverTimestamp(),
+            createdBy: uid,
+            updatedAt: serverTimestamp(),
+            updatedBy: uid,
           };
           tx.set(d.docRefInst as any, payload as any);
         } else {
@@ -107,6 +142,8 @@ export class ExposureGroupService {
             OrganizationName: organizationName,
             Group: d.groupName,
             ExposureGroup: d.groupName,
+            updatedAt: serverTimestamp(),
+            updatedBy: uid,
           });
         }
         saved.push({ id: d.docId, groupName: d.groupName });

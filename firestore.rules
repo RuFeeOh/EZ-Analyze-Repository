@@ -50,18 +50,42 @@ service cloud.firestore {
       // Create forbids EF fields
       allow create: if isUserInOrganization(get(/databases/$(database)/documents/organizations/$(orgId)))
         && !('LatestExceedanceFraction' in request.resource.data)
-        && !('ExceedanceFractionHistory' in request.resource.data);
+        && !('ExceedanceFractionHistory' in request.resource.data)
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedBy == request.auth.uid
+        && request.resource.data.updatedAt == request.time;
       // Update forbids client changes to EF fields
       allow update: if isUserInOrganization(get(/databases/$(database)/documents/organizations/$(orgId)))
         && ( !('LatestExceedanceFraction' in request.resource.data) || request.resource.data.LatestExceedanceFraction == resource.data.LatestExceedanceFraction )
-        && ( !('ExceedanceFractionHistory' in request.resource.data) || request.resource.data.ExceedanceFractionHistory == resource.data.ExceedanceFractionHistory );
+        && ( !('ExceedanceFractionHistory' in request.resource.data) || request.resource.data.ExceedanceFractionHistory == resource.data.ExceedanceFractionHistory )
+        && request.resource.data.updatedBy == request.auth.uid
+        && request.resource.data.updatedAt == request.time
+        && resource.data.createdBy == request.resource.data.createdBy
+        && resource.data.createdAt == request.resource.data.createdAt;
       // Delete
       allow delete: if isUserInOrganization(get(/databases/$(database)/documents/organizations/$(orgId)));
     }
     // Agents under organization
     match /organizations/{orgId}/agents/{agentId} {
       allow get, list: if isUserInOrganization(get(/databases/$(database)/documents/organizations/$(orgId)));
-      allow create, update, delete: if isUserInOrganization(get(/databases/$(database)/documents/organizations/$(orgId)));
+      allow create: if isUserInOrganization(get(/databases/$(database)/documents/organizations/$(orgId)))
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedBy == request.auth.uid
+        && request.resource.data.updatedAt == request.time;
+      allow update: if isUserInOrganization(get(/databases/$(database)/documents/organizations/$(orgId)))
+        && request.resource.data.updatedBy == request.auth.uid
+        && request.resource.data.updatedAt == request.time
+        && resource.data.createdBy == request.resource.data.createdBy
+        && resource.data.createdAt == request.resource.data.createdAt;
+      allow delete: if isUserInOrganization(get(/databases/$(database)/documents/organizations/$(orgId)));
+    }
+
+    // Audit logs (read-only to clients). Writes come from Cloud Functions service account.
+    match /organizations/{orgId}/auditLogs/{logId} {
+      allow read: if isUserInOrganization(get(/databases/$(database)/documents/organizations/$(orgId)));
+      allow write: if false;
     }
 
     match /breakdownTask/{task} {

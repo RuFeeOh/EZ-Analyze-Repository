@@ -10,6 +10,7 @@
 import { onDocumentWritten } from "firebase-functions/v2/firestore";
 import * as logger from "firebase-functions/logger";
 import * as admin from "firebase-admin";
+import { getFirestore, Timestamp, FieldValue } from 'firebase-admin/firestore';
 
 admin.initializeApp();
 
@@ -106,7 +107,7 @@ export const recomputeExceedanceFraction = onDocumentWritten("organizations/{org
         return;
     }
 
-    const db = admin.firestore();
+    const db = getFirestore();
     const orgId = event.params.orgId as string;
     const ref = db.doc(`organizations/${orgId}/exposureGroups/${docId}`);
 
@@ -141,9 +142,180 @@ export const maintainResultsTotalCount = onDocumentWritten("organizations/{orgId
         // Pure update, no net count change
         return;
     }
-    const db = admin.firestore();
+    const db = getFirestore();
     const parentRef = db.doc(`organizations/${orgId}/exposureGroups/${groupId}`);
     const delta = (!beforeExists && afterExists) ? 1 : -1;
-    await parentRef.set({ ResultsTotalCount: admin.firestore.FieldValue.increment(delta) }, { merge: true });
+    await parentRef.set({ ResultsTotalCount: FieldValue.increment(delta) }, { merge: true });
     logger.info(`ResultsTotalCount ${delta > 0 ? '++' : '--'} for org ${orgId} group ${groupId}`);
+});
+
+// --- Audit logs (write-once by Functions) ---
+type AuditLog = {
+    // ISO timestamp when the edit occurred (server time)
+    at: string;
+    actorUid?: string;
+    editedBy?: string;
+    action: 'create' | 'update' | 'delete';
+    documentPath: string;
+    collection: string;
+    docId: string;
+    diff?: any;
+    source?: string;
+    batchId?: string;
+    expireAt?: admin.firestore.Timestamp;
+};
+
+function computeDiff(before: any, after: any) {
+    // If entire object created or deleted, show full added object or a removedAll flag
+    if (!before && after) return { added: after };
+    if (before && !after) return { removedAll: true };
+
+    const isPlainObject = (val: any) => val !== null && typeof val === 'object' && !Array.isArray(val);
+
+    function summarizeValue(v: any) {
+        if (Array.isArray(v)) {
+            return {
+                _type: 'array',
+                length: v.length,
+                preview: v.slice(0, Math.min(1, v.length)),
+            };
+        }
+        return v;
+    }
+
+    function diffArrays(bArr: any[], aArr: any[]) {
+        try {
+            const same = JSON.stringify(bArr) === JSON.stringify(aArr);
+            if (same) return null;
+        } catch { /* ignore stringify errors */ }
+        return {
+            _type: 'array',
+            beforeLength: Array.isArray(bArr) ? bArr.length : undefined,
+            afterLength: Array.isArray(aArr) ? aArr.length : undefined,
+            previewBefore: Array.isArray(bArr) ? bArr.slice(0, Math.min(1, bArr.length)) : undefined,
+            previewAfter: Array.isArray(aArr) ? aArr.slice(0, Math.min(1, aArr.length)) : undefined,
+        };
+    }
+
+    function diffValues(bv: any, av: any): any | null {
+        if (bv === undefined && av !== undefined) return { added: summarizeValue(av) };
+        if (bv !== undefined && av === undefined) return { removed: summarizeValue(bv) };
+        if (isPlainObject(bv) && isPlainObject(av)) return diffObjects(bv, av);
+        if (Array.isArray(bv) && Array.isArray(av)) return diffArrays(bv, av);
+        const same = ((): boolean => {
+            try { return JSON.stringify(bv) === JSON.stringify(av); } catch { return bv === av; }
+        })();
+        if (same) return null;
+        return { before: summarizeValue(bv), after: summarizeValue(av) };
+    }
+
+    function diffObjects(bObj: Record<string, any>, aObj: Record<string, any>) {
+        const changed: any = {};
+        const added: Record<string, any> = {};
+        const removed: Record<string, any> = {};
+        const keys = new Set([...Object.keys(bObj || {}), ...Object.keys(aObj || {})]);
+        for (const k of keys) {
+            const hasB = Object.prototype.hasOwnProperty.call(bObj || {}, k);
+            const hasA = Object.prototype.hasOwnProperty.call(aObj || {}, k);
+            if (!hasB && hasA) { added[k] = summarizeValue(aObj[k]); continue; }
+            if (hasB && !hasA) { removed[k] = summarizeValue(bObj[k]); continue; }
+            const child = diffValues(bObj[k], aObj[k]);
+            if (child) changed[k] = child;
+        }
+        return { changed, added, removed };
+    }
+
+    return diffObjects(before || {}, after || {});
+}
+
+const RETENTION_DAYS = parseInt(process.env.AUDIT_TTL_DAYS || '365', 10);
+
+async function writeAudit(orgId: string, collection: string, docId: string, before: any, after: any) {
+    const db = getFirestore();
+    const path = `organizations/${orgId}/${collection}/${docId}`;
+    const action: 'create' | 'update' | 'delete' = !before && after ? 'create' : before && !after ? 'delete' : 'update';
+    const actorUid = after?.updatedBy || before?.updatedBy || undefined;
+    const expireAt = Timestamp.fromDate(new Date(Date.now() + RETENTION_DAYS * 24 * 60 * 60 * 1000));
+    const nowIso = new Date().toISOString();
+    const diff = computeDiff(before, after);
+
+    const log: AuditLog = {
+        at: nowIso,
+        actorUid,
+        editedBy: actorUid,
+        action,
+        documentPath: path,
+        collection,
+        docId,
+        diff,
+        source: 'function',
+        expireAt,
+    };
+
+    try {
+        const ref = await db.collection(`organizations/${orgId}/auditLogs`).add(log as any);
+        logger.info('Audit log written', { orgId, collection, docId, logId: ref.id, action });
+        return ref.id as string;
+    } catch (err: any) {
+        logger.error('Failed to write audit log', {
+            orgId,
+            collection,
+            docId,
+            action,
+            error: err?.message || String(err),
+            stack: err?.stack,
+        });
+        throw err;
+    }
+}
+
+export const auditExposureGroups = onDocumentWritten("organizations/{orgId}/exposureGroups/{docId}", async (event: any) => {
+    const orgId = event.params.orgId as string;
+    const docId = event.params.docId as string;
+    const beforeExists = !!event.data?.before?.exists;
+    const afterExists = !!event.data?.after?.exists;
+    const before = event.data?.before?.data() as any | undefined;
+    const after = event.data?.after?.data() as any | undefined;
+
+    logger.info('auditExposureGroups fired', {
+        orgId,
+        docId,
+        beforeExists,
+        afterExists,
+        FIRESTORE_EMULATOR_HOST: process.env.FIRESTORE_EMULATOR_HOST || 'not-set',
+    });
+
+    try {
+        const logId = await writeAudit(orgId, 'exposureGroups', docId, before, after);
+        logger.info('auditExposureGroups success', { orgId, docId, logId });
+    } catch (err: any) {
+        logger.error('auditExposureGroups error', { orgId, docId, error: err?.message || String(err) });
+        // Rethrow to surface in emulator logs as failed invocation
+        throw err;
+    }
+});
+
+export const auditAgents = onDocumentWritten("organizations/{orgId}/agents/{docId}", async (event: any) => {
+    const orgId = event.params.orgId as string;
+    const docId = event.params.docId as string;
+    const beforeExists = !!event.data?.before?.exists;
+    const afterExists = !!event.data?.after?.exists;
+    const before = event.data?.before?.data() as any | undefined;
+    const after = event.data?.after?.data() as any | undefined;
+
+    logger.info('auditAgents fired', {
+        orgId,
+        docId,
+        beforeExists,
+        afterExists,
+        FIRESTORE_EMULATOR_HOST: process.env.FIRESTORE_EMULATOR_HOST || 'not-set',
+    });
+
+    try {
+        const logId = await writeAudit(orgId, 'agents', docId, before, after);
+        logger.info('auditAgents success', { orgId, docId, logId });
+    } catch (err: any) {
+        logger.error('auditAgents error', { orgId, docId, error: err?.message || String(err) });
+        throw err;
+    }
 });
