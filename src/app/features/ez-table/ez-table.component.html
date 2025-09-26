@@ -89,7 +89,7 @@
         </ng-container>
 
         <tr mat-header-row
-            *matHeaderRowDef="groupColumns"></tr>
+            *matHeaderRowDef="groupColumns; sticky: true"></tr>
         <tr mat-row
             *matRowDef="let row; columns: groupColumns"
             (click)="hasDetail() && toggle(row)"
@@ -124,7 +124,7 @@
         }
 
         <tr mat-header-row
-            *matHeaderRowDef="columnIds()"></tr>
+            *matHeaderRowDef="columnIds(); sticky: true"></tr>
         <tr mat-row
             *matRowDef="let row; columns: columnIds();"></tr>
     </table>
