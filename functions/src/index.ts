@@ -90,6 +90,8 @@ function createExceedanceFraction(exceedanceFraction: number, resultsUsed: Sampl
     };
 }
 
+
+
 export const recomputeExceedanceFraction = onDocumentWritten("organizations/{orgId}/exposureGroups/{docId}", async (event: any) => {
     const before = event.data?.before?.data() as any | undefined;
     const after = event.data?.after?.data() as any | undefined;
