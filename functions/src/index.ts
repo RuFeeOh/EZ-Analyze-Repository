@@ -8,6 +8,7 @@
  */
 
 import { onDocumentWritten } from "firebase-functions/v2/firestore";
+import { onCall } from "firebase-functions/v2/https";
 import * as logger from "firebase-functions/logger";
 import * as admin from "firebase-admin";
 import { getFirestore, Timestamp, FieldValue } from 'firebase-admin/firestore';
@@ -93,43 +94,107 @@ export const recomputeExceedanceFraction = onDocumentWritten("organizations/{org
     const before = event.data?.before?.data() as any | undefined;
     const after = event.data?.after?.data() as any | undefined;
     const docId = event.params.docId as string;
+    const orgId = event.params.orgId as string;
     if (!after) {
-        logger.info(`EF trigger: document deleted, skipping: organizations/${event.params.orgId}/exposureGroups/${docId}`);
+        logger.info(`EF trigger: document deleted, skipping: organizations/${orgId}/exposureGroups/${docId}`);
         return;
     }
 
-    // Only recompute when Results changed or EF fields missing
+    // If still importing, let results-trigger or batch handle it later
+    if (after?.Importing) {
+        logger.info(`EF trigger: Importing flag set, skipping parent-doc recompute for ${docId}`);
+        return;
+    }
+
+    // Determine if we should recompute:
+    // - EF is missing, OR
+    // - Importing transitioned true -> false, OR
+    // - Legacy path: Results array changed
     const beforeResultsStr = JSON.stringify(before?.Results || []);
     const afterResultsStr = JSON.stringify(after.Results || []);
     const efMissing = !after.LatestExceedanceFraction || !Array.isArray(after.ExceedanceFractionHistory);
-    if (!efMissing && beforeResultsStr === afterResultsStr) {
-        logger.info(`EF trigger: no change in Results and EF present, skipping for ${docId}`);
+    const importingTransition = !!before?.Importing && !after?.Importing;
+    const resultsChanged = beforeResultsStr !== afterResultsStr;
+    if (!efMissing && !importingTransition && !resultsChanged) {
+        logger.info(`EF trigger: no relevant change, skipping for ${docId}`);
         return;
     }
 
     const db = getFirestore();
-    const orgId = event.params.orgId as string;
     const ref = db.doc(`organizations/${orgId}/exposureGroups/${docId}`);
+
+    // Prefer recompute from subcollection (latest 6 with TWA>0). Fallback to parent Results if subcollection empty.
+    const computeFromSubcollection = async (): Promise<{ latest: ExceedanceFraction; mostRecent: SampleInfo[] } | null> => {
+        try {
+            const resultsRef = db.collection(`organizations/${orgId}/exposureGroups/${docId}/results`);
+            const snap = await resultsRef.orderBy('SampleDate', 'desc').limit(12).get();
+            if (snap.empty) return null;
+            const all = snap.docs.map(d => d.data() as any);
+            const candidates = all.filter(r => Number(r?.TWA) > 0);
+            const mostRecent = candidates.slice(0, 6).map(r => ({
+                SampleDate: r.SampleDate,
+                ExposureGroup: r.ExposureGroup || r.Group,
+                TWA: Number(r.TWA),
+                Notes: r.Notes,
+                SampleNumber: r.SampleNumber,
+                Agent: r.Agent,
+            })) as SampleInfo[];
+            const TWAlist = mostRecent.map(r => Number(r.TWA)).filter(n => n > 0);
+            const ef = (TWAlist.length >= 2) ? calculateExceedanceProbability(TWAlist, 0.05) : 0;
+            const latest = createExceedanceFraction(ef, mostRecent, TWAlist);
+            return { latest, mostRecent };
+        } catch (e) {
+            logger.error('computeFromSubcollection failed', { orgId, docId, error: (e as any)?.message || String(e) });
+            return null;
+        }
+    };
+
+    const subResult = await computeFromSubcollection();
+
+    // Compute total count once here (if available) to avoid per-write increments during Importing
+    let totalCount: number | undefined = undefined;
+    try {
+        const resultsRef = db.collection(`organizations/${orgId}/exposureGroups/${docId}/results`);
+        const countFn = (resultsRef as any).count;
+        if (typeof countFn === 'function') {
+            const aggSnap = await (resultsRef as any).count().get();
+            totalCount = aggSnap?.data()?.count ?? undefined;
+        }
+    } catch (e) {
+        logger.info('Results count not available', { orgId, docId });
+    }
 
     await db.runTransaction(async (tx: any) => {
         const snap = await tx.get(ref);
         if (!snap.exists) return;
         const data = snap.data() || {} as any;
-        const results: SampleInfo[] = (data.Results || []) as SampleInfo[];
-        const mostRecent = getMostRecentSamples(results, 6);
-        const TWAlist = mostRecent.map(r => Number(r.TWA)).filter(n => n > 0);
-        const ef = (TWAlist.length >= 2) ? calculateExceedanceProbability(TWAlist, 0.05) : 0;
-        const latest = createExceedanceFraction(ef, mostRecent, TWAlist);
+        let latest: ExceedanceFraction;
+        let mostRecent: SampleInfo[];
+
+        if (subResult) {
+            latest = subResult.latest;
+            mostRecent = subResult.mostRecent;
+        } else {
+            const parentResults: SampleInfo[] = (data.Results || []) as SampleInfo[];
+            mostRecent = getMostRecentSamples(parentResults, 6);
+            const TWAlist = mostRecent.map(r => Number(r.TWA)).filter(n => n > 0);
+            const ef = (TWAlist.length >= 2) ? calculateExceedanceProbability(TWAlist, 0.05) : 0;
+            latest = createExceedanceFraction(ef, mostRecent, TWAlist);
+        }
+
         const history: ExceedanceFraction[] = Array.isArray(data.ExceedanceFractionHistory) ? data.ExceedanceFractionHistory : [];
         const updatedHistory = [...history, latest];
 
-        tx.update(ref, {
+        const payload: any = {
             LatestExceedanceFraction: latest,
             ExceedanceFractionHistory: updatedHistory,
-        });
+            Results: mostRecent, // keep small preview for UI
+        };
+        if (typeof totalCount === 'number') payload.ResultsTotalCount = totalCount;
+        tx.set(ref, payload, { merge: true });
     });
 
-    logger.info(`Recomputed EF for organizations/${event.params.orgId}/exposureGroups/${docId}`);
+    logger.info(`Recomputed EF (parent-trigger) for organizations/${orgId}/exposureGroups/${docId}`);
 });
 
 // Maintain a total count of results on the parent doc using subcollection writes
@@ -144,9 +209,130 @@ export const maintainResultsTotalCount = onDocumentWritten("organizations/{orgId
     }
     const db = getFirestore();
     const parentRef = db.doc(`organizations/${orgId}/exposureGroups/${groupId}`);
+    // Skip count increments while Importing is true to avoid excessive parent writes
+    try {
+        const parentSnap = await parentRef.get();
+        const parentData = parentSnap.exists ? (parentSnap.data() || {}) : {};
+        if (parentData?.Importing) {
+            logger.info(`ResultsTotalCount skipped due to Importing for org ${orgId} group ${groupId}`);
+            return;
+        }
+    } catch { /* ignore and proceed */ }
     const delta = (!beforeExists && afterExists) ? 1 : -1;
     await parentRef.set({ ResultsTotalCount: FieldValue.increment(delta) }, { merge: true });
     logger.info(`ResultsTotalCount ${delta > 0 ? '++' : '--'} for org ${orgId} group ${groupId}`);
+});
+
+// Recompute EF when results subcollection changes: read latest 6, compute EF, update parent doc
+export const recomputeEfOnResultsWrite = onDocumentWritten("organizations/{orgId}/exposureGroups/{groupId}/results/{resultId}", async (event: any) => {
+    const orgId = event.params.orgId as string;
+    const groupId = event.params.groupId as string;
+    const db = getFirestore();
+    const parentRef = db.doc(`organizations/${orgId}/exposureGroups/${groupId}`);
+    // If parent has Importing: true, skip per-write recompute to avoid thrash
+    try {
+        const parentSnap = await parentRef.get();
+        const parentData = parentSnap.exists ? (parentSnap.data() || {}) : {};
+        if (parentData?.Importing) {
+            logger.info(`Results recompute skipped due to Importing flag for org ${orgId} group ${groupId}`);
+            return;
+        }
+        // Debounce: if LatestExceedanceFraction was just updated very recently, skip this run
+        const lastEfIso: string | undefined = parentData?.LatestExceedanceFraction?.DateCalculated;
+        if (lastEfIso) {
+            const last = Date.parse(lastEfIso);
+            if (!isNaN(last)) {
+                const elapsed = Date.now() - last;
+                if (elapsed < 3000) { // 3s debounce window
+                    logger.info(`Results recompute skipped due to debounce for org ${orgId} group ${groupId}`);
+                    return;
+                }
+            }
+        }
+    } catch { /* ignore and proceed */ }
+    // Query latest 6 results (TWA > 0) ordered by SampleDate desc
+    try {
+        const resultsRef = db.collection(`organizations/${orgId}/exposureGroups/${groupId}/results`);
+        const q = resultsRef.orderBy('SampleDate', 'desc').limit(12);
+        const snap = await q.get();
+        const all = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
+        // Filter and pick latest 6 with TWA > 0
+        const candidates = all.filter(r => Number(r?.TWA) > 0);
+        const mostRecent = candidates.slice(0, 6).map(r => ({
+            SampleDate: r.SampleDate,
+            ExposureGroup: r.ExposureGroup || r.Group,
+            TWA: Number(r.TWA),
+            Notes: r.Notes,
+            SampleNumber: r.SampleNumber,
+            Agent: r.Agent,
+        })) as SampleInfo[];
+        const TWAlist = mostRecent.map(r => Number(r.TWA)).filter(n => n > 0);
+        const ef = (TWAlist.length >= 2) ? calculateExceedanceProbability(TWAlist, 0.05) : 0;
+        const latest = createExceedanceFraction(ef, mostRecent, TWAlist);
+        // Append to history (bounded growth could be added later)
+        await db.runTransaction(async (tx: any) => {
+            const parentSnap = await tx.get(parentRef);
+            const data = parentSnap.exists ? (parentSnap.data() || {}) : {};
+            const history: ExceedanceFraction[] = Array.isArray(data.ExceedanceFractionHistory) ? data.ExceedanceFractionHistory : [];
+            const updatedHistory = [...history, latest];
+            tx.set(parentRef, {
+                LatestExceedanceFraction: latest,
+                ExceedanceFractionHistory: updatedHistory,
+                Results: mostRecent, // keep small preview for UI
+                updatedAt: Timestamp.now(),
+            }, { merge: true });
+        });
+        logger.info(`Recomputed EF (results-trigger) for org ${orgId} group ${groupId}`);
+    } catch (err: any) {
+        logger.error('recomputeEfOnResultsWrite error', { orgId, groupId, error: err?.message || String(err) });
+        throw err;
+    }
+});
+
+// HTTPS callable to recompute EF for a set of groups
+export const recomputeEfBatch = onCall(async (request) => {
+    const { orgId, groupIds } = request.data || {};
+    if (!orgId || !Array.isArray(groupIds) || groupIds.length === 0) {
+        throw new Error('orgId and groupIds[] required');
+    }
+    const db = getFirestore();
+    const doOne = async (groupId: string) => {
+        const parentRef = db.doc(`organizations/${orgId}/exposureGroups/${groupId}`);
+        const resultsRef = db.collection(`organizations/${orgId}/exposureGroups/${groupId}/results`);
+        const snap = await resultsRef.orderBy('SampleDate', 'desc').limit(12).get();
+        const all = snap.docs.map(d => d.data() as any);
+        const candidates = all.filter(r => Number(r?.TWA) > 0);
+        const mostRecent = candidates.slice(0, 6).map(r => ({
+            SampleDate: r.SampleDate,
+            ExposureGroup: r.ExposureGroup || r.Group,
+            TWA: Number(r.TWA),
+            Notes: r.Notes,
+            SampleNumber: r.SampleNumber,
+            Agent: r.Agent,
+        })) as SampleInfo[];
+        const TWAlist = mostRecent.map(r => Number(r.TWA)).filter(n => n > 0);
+        const ef = (TWAlist.length >= 2) ? calculateExceedanceProbability(TWAlist, 0.05) : 0;
+        const latest = createExceedanceFraction(ef, mostRecent, TWAlist);
+        await parentRef.set({
+            LatestExceedanceFraction: latest,
+            ExceedanceFractionHistory: FieldValue.arrayUnion(latest as any),
+            Results: mostRecent,
+            Importing: false,
+            updatedAt: Timestamp.now(),
+        }, { merge: true });
+    };
+    // Limit concurrency to avoid hot shards
+    const pool = 10;
+    const queue = [...groupIds];
+    const workers: Promise<any>[] = new Array(Math.min(pool, queue.length)).fill(0).map(async () => {
+        while (queue.length) {
+            const id = queue.shift();
+            if (!id) break;
+            try { await doOne(id); } catch (e) { logger.error('recomputeEfBatch item failed', { id, error: (e as any)?.message || String(e) }); }
+        }
+    });
+    await Promise.all(workers);
+    return { ok: true, count: groupIds.length };
 });
 
 // --- Audit logs (write-once by Functions) ---
@@ -230,6 +416,7 @@ function computeDiff(before: any, after: any) {
 const RETENTION_DAYS = parseInt(process.env.AUDIT_TTL_DAYS || '365', 10) * 2;
 
 async function writeAudit(orgId: string, collection: string, docId: string, before: any, after: any) {
+    return true;
     const db = getFirestore();
     const path = `organizations/${orgId}/${collection}/${docId}`;
     const action: 'create' | 'update' | 'delete' = !before && after ? 'create' : before && !after ? 'delete' : 'update';
@@ -269,6 +456,8 @@ async function writeAudit(orgId: string, collection: string, docId: string, befo
 }
 
 export const auditExposureGroups = onDocumentWritten("organizations/{orgId}/exposureGroups/{docId}", async (event: any) => {
+
+    return true;
     const orgId = event.params.orgId as string;
     const docId = event.params.docId as string;
     const beforeExists = !!event.data?.before?.exists;

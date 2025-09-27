@@ -1,0 +1,56 @@
+<div class="bg-status"
+     [class.isShowing]="isShowing()"
+     [class.collapsed]="isCollapsed()">
+    <div class="header"
+         (click)="toggle()">
+        <mat-icon>sync</mat-icon>
+        <span class="title">Background activity</span>
+        <span class="spacer"></span>
+        <button mat-icon-button
+                (click)="$event.stopPropagation(); toggle()"
+                aria-label="Toggle">
+            <mat-icon>{{ isCollapsed() ? 'expand_less' : 'expand_more' }}</mat-icon>
+        </button>
+    </div>
+
+    <div class="content"
+         *ngIf="!isCollapsed()">
+        <ng-container *ngIf="tasks().length as len; else empty">
+            <ng-container *ngIf="tasks() as tasks">
+                <div class="task"
+                     *ngFor="let t of tasks; trackBy: trackById">
+                    <div class="row">
+                        <div class="label">
+                            <mat-icon class="kind"
+                                      *ngIf="t.kind === 'upload'">cloud_upload</mat-icon>
+                            <mat-icon class="kind"
+                                      *ngIf="t.kind === 'compute'">calculate</mat-icon>
+                            <mat-icon class="kind"
+                                      *ngIf="t.kind === 'other'">more_horiz</mat-icon>
+                            <span>{{ t.label }}</span>
+                        </div>
+                        <div class="state"
+                             [class.failed]="t.status === 'failed'"
+                             [class.completed]="t.status === 'completed'">
+                            {{ t.status }}
+                        </div>
+                        <button mat-icon-button
+                                class="dismiss"
+                                (click)="$event.stopPropagation(); remove(t.id)"
+                                [attr.aria-label]="'Dismiss ' + t.label">
+                            <mat-icon>close</mat-icon>
+                        </button>
+                    </div>
+                    <div class="detail"
+                         *ngIf="t.detail">{{ t.detail }}</div>
+                    <mat-progress-bar *ngIf="t.status === 'running'"
+                                      [mode]="t.indeterminate ? 'indeterminate' : 'determinate'"
+                                      [value]="t.total ? (100 * (t.done || 0) / t.total) : 0"></mat-progress-bar>
+                </div>
+            </ng-container>
+        </ng-container>
+        <ng-template #empty>
+            <div class="empty">No background activity.</div>
+        </ng-template>
+    </div>
+</div>

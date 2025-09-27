@@ -1,0 +1,109 @@
+.bg-status {
+    position: fixed;
+    right: 16px;
+    bottom: 16px;
+    width: 360px;
+    max-height: 50vh;
+    background: #fff;
+    color: #222;
+    border-radius: 8px;
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.16);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    z-index: 1000;
+}
+
+.bg-status.collapsed {
+    height: 44px;
+}
+
+.header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 8px 8px 12px;
+    background: #f5f5f5;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+    cursor: pointer;
+}
+
+.title {
+    font-weight: 600;
+}
+
+.spacer {
+    flex: 1;
+}
+
+.content {
+    padding: 8px 12px 12px;
+    overflow: auto;
+}
+
+.dismiss {
+    margin-left: 4px;
+}
+
+.task {
+    margin-bottom: 12px;
+}
+
+.task:last-child {
+    margin-bottom: 0;
+}
+
+.row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 4px;
+}
+
+.label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 500;
+}
+
+.kind {
+    font-size: 18px;
+    height: 18px;
+    width: 18px;
+}
+
+.state {
+    font-size: 12px;
+    opacity: 0.7;
+    text-transform: capitalize;
+}
+
+.state.failed {
+    color: #c62828;
+    opacity: 1;
+}
+
+.state.completed {
+    color: #2e7d32;
+    opacity: 1;
+}
+
+.detail {
+    font-size: 12px;
+    opacity: 0.8;
+    margin-bottom: 6px;
+}
+
+.empty {
+    font-size: 12px;
+    opacity: 0.7;
+}
+
+.bg-status {
+    display: none;
+
+    &.isShowing {
+        display: block;
+    }
+}

@@ -1,5 +1,5 @@
 import { inject, Injectable } from '@angular/core';
-import { collection, doc, runTransaction, serverTimestamp } from 'firebase/firestore';
+import { collection, doc, runTransaction, serverTimestamp, writeBatch, getDocs, query, where, documentId } from 'firebase/firestore';
 import { SampleInfo } from '../../models/sample-info.model';
 import { Firestore } from '@angular/fire/firestore';
 import { ExposureGroup } from '../../models/exposure-group.model';
@@ -23,15 +23,31 @@ export class ExposureGroupService {
    * Keeps only the known SampleInfo fields.
    */
   private sanitizeRows(rows: SampleInfo[] = []): SampleInfo[] {
-    return (rows || []).map((r: any) => ({
-      Location: r?.Location ?? "",
-      SampleNumber: r?.SampleNumber,
-      SampleDate: r?.SampleDate ?? "",
-      ExposureGroup: r?.ExposureGroup ?? "",
-      Agent: r?.Agent ?? "",
-      TWA: r?.TWA,
-      Notes: r?.Notes ?? "",
-    }));
+    return (rows || []).map((r: any) => {
+      // Ensure we never return undefined fields (Firestore forbids undefined values)
+      const sampleNumber = r?.SampleNumber;
+      const twaRaw = r?.TWA;
+      const twa = (twaRaw === '' || twaRaw === undefined || twaRaw === null) ? null : Number(twaRaw);
+      return {
+        Location: r?.Location ?? "",
+        SampleNumber: (sampleNumber === undefined || sampleNumber === '') ? null : sampleNumber,
+        SampleDate: r?.SampleDate ?? "",
+        ExposureGroup: r?.ExposureGroup ?? "",
+        Agent: r?.Agent ?? "",
+        TWA: twa,
+        Notes: r?.Notes ?? "",
+      } as SampleInfo as any;
+    });
+  }
+
+  // Remove undefined values to satisfy Firestore data constraints
+  private stripUndefined<T extends Record<string, any>>(obj: T): T {
+    const out: any = {};
+    for (const k of Object.keys(obj || {})) {
+      const v = (obj as any)[k];
+      if (v !== undefined) out[k] = v;
+    }
+    return out as T;
   }
 
   async saveSampleInfo(sampleInfo: SampleInfo[], organizationUid: string, organizationName: string) {
@@ -43,7 +59,8 @@ export class ExposureGroupService {
       const docRef = doc(colRef, docId);
 
       // Upsert using a transaction to atomically concatenate results
-      const uid = this.auth.currentUser?.uid || 'unknown';
+      const uid = this.auth.currentUser?.uid;
+      if (!uid) throw new Error('AUTH_REQUIRED');
       await runTransaction(this.firestore, async (tx) => {
         const snap = await tx.get(docRef as any);
         const existingData: any = snap.exists() ? (snap.data() || {}) : {};
@@ -100,57 +117,107 @@ export class ExposureGroupService {
     const entries = Object.entries(groups || {}).filter(([_, arr]) => (arr?.length ?? 0) > 0);
     if (entries.length === 0) return [];
 
-    const uid = this.auth.currentUser?.uid || 'unknown';
-    const result = await runTransaction(this.firestore, async (tx) => {
-      const saved: { id: string, groupName: string }[] = [];
+    const uid = this.auth.currentUser?.uid;
+    if (!uid) throw new Error('AUTH_REQUIRED');
+    const saved: { id: string, groupName: string }[] = [];
 
-      // Pass 1: Read all docs first
-      const docs = await Promise.all(entries.map(async ([groupNameRaw, samples]) => {
+    // 1) Ensure parent docs exist and set Importing flag (batched existence check)
+    {
+      // Build list of ids and map to names/refs
+      const idMap: { id: string; groupName: string; ref: any }[] = entries.map(([groupNameRaw, samples]) => {
         const groupName = groupNameRaw || samples[0]?.ExposureGroup || 'unknown-group';
-        const docId = this.slugify(groupName);
-        const docRefInst = doc(colRef, docId);
-        const snap = await tx.get(docRefInst as any);
-        const existingData: any = snap.exists() ? (snap.data() || {}) : {};
-        return { groupName, docId, docRefInst, snap, existingData, samples };
-      }));
+        const id = this.slugify(groupName);
+        const ref = doc(colRef, id);
+        return { id, groupName, ref };
+      });
 
-      // Pass 2: Compute updates and write (EF fields updated server-side)
-      for (const d of docs) {
-        const existingResults: SampleInfo[] = (d.existingData?.Results ?? []) as SampleInfo[];
-        const updatedResults: SampleInfo[] = [
-          ...this.sanitizeRows(existingResults),
-          ...this.sanitizeRows(d.samples),
-        ];
 
-        if (!d.snap.exists()) {
-          const payload = {
-            OrganizationUid: organizationUid,
-            OrganizationName: organizationName,
-            Group: d.groupName,
-            ExposureGroup: d.groupName,
-            Results: JSON.parse(JSON.stringify(updatedResults)),
+      const existing = new Set<string>();
+      try {
+        const q = query(colRef as any, where(documentId(), 'in', idMap.map(s => s.id)));
+        const snap = await getDocs(q as any);
+        snap.forEach(d => existing.add(d.id));
+      } catch {
+        // If a chunk fails (e.g., emulator edge), fall back by marking none existing for this slice
+      }
+
+      // Write Importing flag, with created fields only for new docs
+      const batch = writeBatch(this.firestore);
+      for (const item of idMap) {
+        const base: any = {
+          OrganizationUid: organizationUid,
+          OrganizationName: organizationName,
+          Group: item.groupName,
+          ExposureGroup: item.groupName,
+          Importing: true,
+          updatedAt: serverTimestamp(),
+          updatedBy: uid,
+        };
+        const isExisting = existing.has(item.id);
+        if (!isExisting) {
+          base.createdAt = serverTimestamp();
+          base.createdBy = uid;
+        }
+        batch.set(item.ref as any, base, { merge: true });
+        saved.push({ id: item.id, groupName: item.groupName });
+      }
+      await batch.commit();
+    }
+
+    // 2) Write results to subcollections in chunks
+    const CHUNK = 300; // rows per batch
+    const errors: { group: string; error: string }[] = [];
+    for (const [groupNameRaw, samplesRaw] of entries) {
+      const groupName = groupNameRaw || samplesRaw[0]?.ExposureGroup || 'unknown-group';
+      const docId = this.slugify(groupName);
+      const resultsCol = collection(this.firestore, `organizations/${organizationUid}/exposureGroups/${docId}/results`);
+      const samples = this.sanitizeRows(samplesRaw);
+      for (let i = 0; i < samples.length; i += CHUNK) {
+        const batch = writeBatch(this.firestore);
+        const end = Math.min(i + CHUNK, samples.length);
+        for (let j = i; j < end; j++) {
+          const s = samples[j] as any;
+          // Use idempotent id: SampleNumber + SampleDate + TWA hash (best-effort)
+          const rawId = `${s.SampleNumber || ''}-${s.SampleDate || ''}-${s.TWA || ''}-${j}`.toLowerCase();
+          const id = rawId.replace(/[^a-z0-9\-]/g, '').slice(0, 120) || `${Date.now()}-${j}`;
+          const docRefInst = doc(resultsCol as any, id);
+          const payload = this.stripUndefined({
+            ...s,
+            Group: groupName,
+            ExposureGroup: groupName,
             createdAt: serverTimestamp(),
             createdBy: uid,
             updatedAt: serverTimestamp(),
             updatedBy: uid,
-          };
-          tx.set(d.docRefInst as any, payload as any);
-        } else {
-          tx.update(d.docRefInst as any, {
-            Results: JSON.parse(JSON.stringify(updatedResults)),
-            OrganizationUid: organizationUid,
-            OrganizationName: organizationName,
-            Group: d.groupName,
-            ExposureGroup: d.groupName,
-            updatedAt: serverTimestamp(),
-            updatedBy: uid,
           });
+          batch.set(docRefInst as any, payload, { merge: true });
         }
-        saved.push({ id: d.docId, groupName: d.groupName });
+        try {
+          await batch.commit();
+        } catch (e: any) {
+          errors.push({ group: groupName, error: e?.message || String(e) });
+        }
       }
-      return saved;
-    });
-    return result;
+    }
+
+    // 3) Clear Importing flag (EF will recompute via subcollection trigger or via callable below)
+    {
+      const batch = writeBatch(this.firestore);
+      for (const s of saved) {
+        const docRefInst = doc(colRef, s.id);
+        batch.set(docRefInst as any, { Importing: false, updatedAt: serverTimestamp(), updatedBy: uid }, { merge: true });
+      }
+      await batch.commit();
+    }
+
+    if (errors.length) {
+      const message = `Some groups failed to upload (${errors.length}). First error: ${errors[0].group}: ${errors[0].error}`;
+      const err = new Error(message);
+      (err as any).code = 'PARTIAL_UPLOAD_FAILED';
+      (err as any).details = errors;
+      throw err;
+    }
+    return saved;
   }
 
 

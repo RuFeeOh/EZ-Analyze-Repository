@@ -7,9 +7,10 @@ import { EfRecomputeTrackerService } from '../../services/exceedance-fraction/ef
 import { OrganizationService } from '../../services/organization/organization.service';
 import { Firestore } from '@angular/fire/firestore';
 import { Auth } from '@angular/fire/auth';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { SnackService } from '../../services/ui/snack.service';
 import { BehaviorSubject, firstValueFrom } from 'rxjs';
+import { BackgroundStatusService } from '../../services/background-status/background-status.service';
 import { AgentService } from '../../services/agent/agent.service';
 import { SampleInfo } from '../../models/sample-info.model';
 
@@ -28,6 +29,7 @@ export class DataService {
     private snackBar = inject(SnackService);
     private agentService = inject(AgentService);
     private dialog = inject(MatDialog);
+    private bg = inject(BackgroundStatusService);
 
     calculateExceedanceFraction(rows: SampleInfo[]): number {
         const TWAlist: number[] = this.exposureGroupservice.getTWAListFromSampleInfo(rows);
@@ -36,19 +38,11 @@ export class DataService {
 
     async save(context: SaveContext) {
         const currentOrg = this.organizationservice.currentOrg;
-        if (!currentOrg) throw new Error('No current organization');
+        if (!currentOrg) { this.snackBar.open('Please select an organization before uploading.', 'Dismiss', { duration: 5000, verticalPosition: 'top' }); return; }
         const uid = this.auth.currentUser?.uid;
         if (!uid) { this.snackBar.open('Please sign in to save data.', 'Dismiss', { duration: 4000, verticalPosition: 'top' }); return; }
-        try {
-            const orgRef = doc(this.firestore as any, `organizations/${currentOrg.Uid}`);
-            const snap = await getDoc(orgRef as any);
-            if (!snap.exists()) await setDoc(orgRef as any, { Uid: currentOrg.Uid, Name: currentOrg.Name, UserUids: uid ? [uid] : [] });
-            else {
-                const data: any = snap.data();
-                const members: string[] = Array.isArray(data?.UserUids) ? data.UserUids : [];
-                if (uid && !members.includes(uid)) { this.snackBar.open('You are not a member of the selected organization in this environment.', 'Dismiss', { duration: 6000, verticalPosition: 'top' }); return; }
-            }
-        } catch { }
+
+
         const validRows = context.validRows;
         const allAgents = Array.from(new Set(validRows.map(r => (r.Agent || '').trim()).filter(a => !!a)));
         if (allAgents.length) {
@@ -72,26 +66,67 @@ export class DataService {
         const startIso = new Date().toISOString();
         const ids = Object.keys(grouped).map(name => this.slugify(name));
         const total = ids.length;
+        const shouldWaitForEf = total > 0 && total <= 10; // wait only for small imports
+        const uploadTaskId = this.bg.startTask({ label: 'Uploading results', detail: `${total} exposure group(s)`, kind: 'upload', total });
         let progressSnackRef: any = null;
         const progress$ = new BehaviorSubject<{ done: number; total: number }>({ done: 0, total });
-        if (total > 0) {
+        if (shouldWaitForEf) {
             try {
                 const { ProgressSnackComponent } = await import('../../shared/progress-snack/progress-snack.component');
                 progressSnackRef = this.snackBar.openFromComponent(ProgressSnackComponent, { data: { label: 'Recomputing EF…', progress$ } });
             } catch { }
         }
         try {
+            const groupsList = Object.keys(grouped);
+            let doneGroups = 0;
+            // Wrap save to emit progress per group completion by intercepting after each group's batches
+            // We don't have per-group callbacks here, so approximate: update as groups finish by polling efTracker or simply increment sequentially after the write returns.
             await this.exposureGroupservice.saveGroupedSampleInfo(grouped, currentOrg.Uid, currentOrg.Name);
+            doneGroups = groupsList.length;
+            this.bg.updateTask(uploadTaskId, { done: doneGroups, total, detail: `${doneGroups}/${total} groups uploaded` });
+            this.bg.completeTask(uploadTaskId, 'Upload complete');
             if (total === 0) { this.snackBar.open('Nothing to recompute.', 'OK', { duration: 2000, verticalPosition: 'top' }); return; }
-            const res = await this.efTracker.waitForEf(currentOrg.Uid, ids, startIso, (done, totalCount) => {
-                try { progress$.next({ done, total: totalCount }); context.onProgress?.(done, totalCount); } catch { }
-            }, 60000);
+            if (shouldWaitForEf) {
+                const efTaskId = this.bg.startTask({ label: 'Computing exceedance fractions', detail: `${total} exposure group(s)`, kind: 'compute', total });
+                const res = await this.efTracker.waitForEf(currentOrg.Uid, ids, startIso, (done, totalCount) => {
+                    try {
+                        progress$.next({ done, total: totalCount });
+                        this.bg.updateTask(efTaskId, { done, total: totalCount, detail: `${done}/${totalCount} updated` });
+                        context.onProgress?.(done, totalCount);
+                    } catch { }
+                }, 60000);
+                try { progressSnackRef?.dismiss(); } catch { }
+                if (res.timedOut) {
+                    this.bg.failTask(efTaskId, 'Timed out');
+                    this.snackBar.open('EF recompute is taking longer than expected.', 'Dismiss', { duration: 5000 });
+                } else {
+                    this.bg.completeTask(efTaskId, 'Recompute complete');
+                    this.snackBar.open('EF recompute complete.', 'OK', { duration: 3000 });
+                }
+            } else {
+                // Large import: let EF compute in background and free the UI immediately
+                const efTaskId = this.bg.startTask({ label: 'Computing exceedance fractions', detail: `${total} exposure group(s)`, kind: 'compute', total });
+                // Don't block UI; just observe progress and complete task when done
+                this.efTracker.waitForEf(currentOrg.Uid, ids, startIso, (done, totalCount) => {
+                    this.bg.updateTask(efTaskId, { done, total: totalCount, detail: `${done}/${totalCount} updated` });
+                }, 600000).then(res => {
+                    if (res.timedOut) this.bg.failTask(efTaskId, 'Timed out'); else this.bg.completeTask(efTaskId, 'Recompute complete');
+                }).catch(() => this.bg.failTask(efTaskId, 'Error'));
+                this.snackBar.open(`Imported ${total} groups. EF will compute in the background.`, 'OK', { duration: 4000, verticalPosition: 'top' });
+            }
+        } catch (e: any) {
             try { progressSnackRef?.dismiss(); } catch { }
-            if (res.timedOut) this.snackBar.open('EF recompute is taking longer than expected.', 'Dismiss', { duration: 5000 });
-            else this.snackBar.open('EF recompute complete.', 'OK', { duration: 3000 });
-        } catch {
-            try { progressSnackRef?.dismiss(); } catch { }
-            this.snackBar.open('Save failed. Please try again.', 'Dismiss', { duration: 5000 });
+            const partial = String(e?.code || '').includes('PARTIAL_UPLOAD_FAILED') || String(e?.message || '').includes('Some groups failed to upload');
+            this.bg.failTask(uploadTaskId, partial ? 'Partial upload failed' : 'Upload failed');
+            const msg = ((): string => {
+                const text = String(e?.message || e || '');
+                if (text.includes('AUTH_REQUIRED')) return 'Please sign in to save data.';
+                if (text.includes('Missing or insufficient permissions') || text.includes('PERMISSION_DENIED')) return 'You do not have permission to save to this organization.';
+                if (partial) return text;
+                return 'Save failed. Please try again.';
+            })();
+            this.snackBar.open(msg, 'Dismiss', { duration: 6000, verticalPosition: 'top' });
+            return; // do not proceed to EF tracking on failure
         }
     }
 

@@ -11,7 +11,7 @@ import { execSync } from 'node:child_process';
 
 // Ports used by Firestore / Auth / Functions / Hosting / UI (adjust as needed)
 // Note: macOS commonly reserves 5000 for AirPlay Receiver; prefer avoiding it.
-const DEFAULT_PORTS = [8080, 9099, 5001, 4400, 5100, 9199, 4000];
+const DEFAULT_PORTS = [8080, 9099, 5001, 4400, 5100, 9199, 4000, 4200, 4500, 9150];
 const PORTS = process.env.CLEANUP_PORTS
     ? process.env.CLEANUP_PORTS.split(',').map(p => Number(p.trim())).filter(Boolean)
     : DEFAULT_PORTS;

@@ -58,12 +58,28 @@ service cloud.firestore {
       // Update forbids client changes to EF fields
       allow update: if isUserInOrganization(get(/databases/$(database)/documents/organizations/$(orgId)))
         && ( !('LatestExceedanceFraction' in request.resource.data) || request.resource.data.LatestExceedanceFraction == resource.data.LatestExceedanceFraction )
-        && ( !('ExceedanceFractionHistory' in request.resource.data) || request.resource.data.ExceedanceFractionHistory == resource.data.ExceedanceFractionHistory )
+        && ( !('ExceedanceFractionHistory' in request.resource.data) || request.resource.data.ExceedanceFractionHistory == resource.data.ExceedanceFractionHistory );
+      // Delete
+      allow delete: if isUserInOrganization(get(/databases/$(database)/documents/organizations/$(orgId)));
+    }
+
+    // Results subcollection under an exposure group (rows of samples)
+    match /organizations/{orgId}/exposureGroups/{exposureGroup}/results/{resultId} {
+      allow get, list: if isUserInOrganization(get(/databases/$(database)/documents/organizations/$(orgId)));
+      // Members can create rows but must set audit fields and cannot touch EF fields
+      allow create: if isUserInOrganization(get(/databases/$(database)/documents/organizations/$(orgId)))
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.createdAt == request.time
         && request.resource.data.updatedBy == request.auth.uid
         && request.resource.data.updatedAt == request.time
-        && resource.data.createdBy == request.resource.data.createdBy
-        && resource.data.createdAt == request.resource.data.createdAt;
-      // Delete
+        && !('LatestExceedanceFraction' in request.resource.data)
+        && !('ExceedanceFractionHistory' in request.resource.data);
+      // Update allowed for fixing row values; must keep createdAt/By stable and update audit fields
+      allow update: if isUserInOrganization(get(/databases/$(database)/documents/organizations/$(orgId)))
+        && request.resource.data.updatedBy == request.auth.uid
+        && request.resource.data.updatedAt == request.time
+        && !('LatestExceedanceFraction' in request.resource.data)
+        && !('ExceedanceFractionHistory' in request.resource.data);
       allow delete: if isUserInOrganization(get(/databases/$(database)/documents/organizations/$(orgId)));
     }
     // Agents under organization
@@ -76,9 +92,7 @@ service cloud.firestore {
         && request.resource.data.updatedAt == request.time;
       allow update: if isUserInOrganization(get(/databases/$(database)/documents/organizations/$(orgId)))
         && request.resource.data.updatedBy == request.auth.uid
-        && request.resource.data.updatedAt == request.time
-        && resource.data.createdBy == request.resource.data.createdBy
-        && resource.data.createdAt == request.resource.data.createdAt;
+        && request.resource.data.updatedAt == request.time;
       allow delete: if isUserInOrganization(get(/databases/$(database)/documents/organizations/$(orgId)));
     }
 

@@ -1,6 +1,6 @@
 import { CommonModule } from '@angular/common';
 import { Component, inject } from '@angular/core';
-import { Auth, GoogleAuthProvider, signInWithPopup, signOut, user } from '@angular/fire/auth';
+import { Auth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, signOut, user } from '@angular/fire/auth';
 import { Router } from '@angular/router';
 import { OrganizationService } from '../../services/organization/organization.service';
 
@@ -21,7 +21,15 @@ export class LoginComponent {
 
   async login() {
     try {
-      await signInWithPopup(this.auth, new GoogleAuthProvider());
+      // First, check if we're coming back from a redirect
+      try { await getRedirectResult(this.auth); } catch { /* ignore */ }
+      try {
+        await signInWithPopup(this.auth, new GoogleAuthProvider());
+      } catch (e: any) {
+        // Popup may fail in emulator on reloads; fall back to redirect
+        await signInWithRedirect(this.auth, new GoogleAuthProvider());
+        return;
+      }
       // After successful login, navigate to organization selector
       this.router.navigateByUrl('/org');
     } catch (e) {

@@ -8,10 +8,11 @@ import { CommonModule } from '@angular/common';
 import { MatToolbarModule } from '@angular/material/toolbar';
 import { MatIconModule } from '@angular/material/icon';
 import { MatMenuModule } from '@angular/material/menu';
-import { Auth, GoogleAuthProvider, signInWithPopup, signOut, user } from '@angular/fire/auth';
+import { Auth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, signOut, user } from '@angular/fire/auth';
 import { OrganizationCircleComponent } from './features/organization-circle/organization-circle.component';
 import { LeftNavigationComponent } from './features/left-navigation/left-navigation.component';
 import { HeaderComponent } from './features/header/header.component';
+import { BackgroundStatusComponent } from './features/background-status/background-status.component';
 
 @Component({
   selector: 'app-root',
@@ -25,6 +26,7 @@ import { HeaderComponent } from './features/header/header.component';
     MatMenuModule,
     LeftNavigationComponent,
     HeaderComponent,
+    BackgroundStatusComponent,
   ],
   templateUrl: './app.component.html',
   styleUrl: './app.component.scss'
@@ -40,7 +42,13 @@ export class AppComponent {
 
   async login() {
     try {
-      await signInWithPopup(this.auth, new GoogleAuthProvider());
+      try { await getRedirectResult(this.auth); } catch { /* ignore */ }
+      try {
+        await signInWithPopup(this.auth, new GoogleAuthProvider());
+      } catch {
+        await signInWithRedirect(this.auth, new GoogleAuthProvider());
+        return;
+      }
     } catch {
       // No-op
     }
