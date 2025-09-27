@@ -133,12 +133,17 @@ export class ExposureGroupService {
 
 
       const existing = new Set<string>();
-      try {
-        const q = query(colRef as any, where(documentId(), 'in', idMap.map(s => s.id)));
-        const snap = await getDocs(q as any);
-        snap.forEach(d => existing.add(d.id));
-      } catch {
-        // If a chunk fails (e.g., emulator edge), fall back by marking none existing for this slice
+      // Query in chunks to respect IN operator limits (typically 30 values)
+      const EXIST_CHUNK = 30;
+      for (let i = 0; i < idMap.length; i += EXIST_CHUNK) {
+        const slice = idMap.slice(i, i + EXIST_CHUNK);
+        try {
+          const q = query(colRef as any, where(documentId(), 'in', slice.map(s => s.id)));
+          const snap = await getDocs(q as any);
+          snap.forEach(d => existing.add(d.id));
+        } catch {
+          // If a chunk fails (e.g., emulator edge), skip existence optimization for that chunk
+        }
       }
 
       // Write Importing flag, with created fields only for new docs

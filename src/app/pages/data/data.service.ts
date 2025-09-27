@@ -6,6 +6,7 @@ import { ExposureGroupService } from '../../services/exposure-group/exposure-gro
 import { EfRecomputeTrackerService } from '../../services/exceedance-fraction/ef-recompute-tracker.service';
 import { OrganizationService } from '../../services/organization/organization.service';
 import { Firestore } from '@angular/fire/firestore';
+import { Functions, httpsCallable } from '@angular/fire/functions';
 import { Auth } from '@angular/fire/auth';
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { SnackService } from '../../services/ui/snack.service';
@@ -26,6 +27,7 @@ export class DataService {
     organizationservice = inject(OrganizationService);
     private firestore = inject(Firestore);
     private auth = inject(Auth);
+    private functions = inject(Functions);
     private snackBar = inject(SnackService);
     private agentService = inject(AgentService);
     private dialog = inject(MatDialog);
@@ -67,7 +69,7 @@ export class DataService {
         const ids = Object.keys(grouped).map(name => this.slugify(name));
         const total = ids.length;
         const shouldWaitForEf = total > 0 && total <= 10; // wait only for small imports
-        const uploadTaskId = this.bg.startTask({ label: 'Uploading results', detail: `${total} exposure group(s)`, kind: 'upload', total });
+        const uploadTaskId = this.bg.startTask({ label: 'Uploading results', detail: `${total} exposure group(s)`, kind: 'upload', total, indeterminate: true });
         let progressSnackRef: any = null;
         const progress$ = new BehaviorSubject<{ done: number; total: number }>({ done: 0, total });
         if (shouldWaitForEf) {
@@ -77,14 +79,66 @@ export class DataService {
             } catch { }
         }
         try {
-            const groupsList = Object.keys(grouped);
-            let doneGroups = 0;
-            // Wrap save to emit progress per group completion by intercepting after each group's batches
-            // We don't have per-group callbacks here, so approximate: update as groups finish by polling efTracker or simply increment sequentially after the write returns.
-            await this.exposureGroupservice.saveGroupedSampleInfo(grouped, currentOrg.Uid, currentOrg.Name);
-            doneGroups = groupsList.length;
-            this.bg.updateTask(uploadTaskId, { done: doneGroups, total, detail: `${doneGroups}/${total} groups uploaded` });
-            this.bg.completeTask(uploadTaskId, 'Upload complete');
+            // For large imports, offload to server BulkWriter for speed; for small, stay client-side
+            if (total > 50) {
+                const call = httpsCallable(this.functions as any, 'bulkImportResults');
+                const groupsPayload = Object.entries(grouped).map(([groupName, samples]) => ({ groupName, samples }));
+                // Chunk by rows and groups to avoid 10MB callable payload limits
+                const chunkByRows = (items: any[], maxRowsPerBatch = 3500, maxGroupsPerBatch = 150) => {
+                    const batches: any[][] = [];
+                    let current: any[] = [];
+                    let rows = 0;
+                    for (const g of items) {
+                        const c = (g.samples?.length || 0);
+                        if (current.length && (rows + c > maxRowsPerBatch || current.length >= maxGroupsPerBatch)) {
+                            batches.push(current);
+                            current = [];
+                            rows = 0;
+                        }
+                        current.push(g);
+                        rows += c;
+                    }
+                    if (current.length) batches.push(current);
+                    return batches;
+                };
+                const batches = chunkByRows(groupsPayload);
+                const totalBatches = batches.length;
+                const unsubscribers: Array<() => void> = [];
+                const jobProgress: Record<string, { rows: number; totalRows: number; status?: string }> = {};
+                const updateAggregateProgress = () => {
+                    const rows = Object.values(jobProgress).reduce((s, v) => s + (v.rows || 0), 0);
+                    const totalRows = Object.values(jobProgress).reduce((s, v) => s + (v.totalRows || 0), 0);
+                    const completed = Object.values(jobProgress).filter(v => v.status === 'completed' || v.status === 'completed-with-errors' || v.status === 'failed').length;
+                    this.bg.updateTask(uploadTaskId, { detail: `${rows}/${totalRows} rows • ${completed}/${totalBatches} batches`, indeterminate: totalRows ? false : true });
+                };
+                for (let i = 0; i < batches.length; i++) {
+                    const batch = batches[i];
+                    this.bg.updateTask(uploadTaskId, { detail: `Submitting batch ${i + 1}/${totalBatches}…` });
+                    const resp: any = await call({ orgId: currentOrg.Uid, organizationName: currentOrg.Name, groups: batch });
+                    const jobId = resp?.data?.jobId as string | undefined;
+                    if (jobId) {
+                        const jobDoc = doc(this.firestore as any, `organizations/${currentOrg.Uid}/importJobs/${jobId}`);
+                        const { onSnapshot } = await import('firebase/firestore');
+                        const unsub = onSnapshot(jobDoc as any, (snap: any) => {
+                            const d = (snap?.data?.() || {}) as any;
+                            jobProgress[jobId] = { rows: d.rowsWritten || 0, totalRows: d.totalRows || 0, status: d.status };
+                            updateAggregateProgress();
+                        }, (err: any) => {
+                            // If permission denied for job doc, keep going
+                            updateAggregateProgress();
+                        });
+                        unsubscribers.push(() => { try { unsub(); } catch { } });
+                    }
+                }
+                // Stop polling after a reasonable window (10 minutes)
+                setTimeout(() => { unsubscribers.forEach(u => u()); }, 10 * 60 * 1000);
+                this.bg.completeTask(uploadTaskId, `Upload queued on server • ${totalBatches} batch(es)`);
+            } else {
+                const groupsList = Object.keys(grouped);
+                await this.exposureGroupservice.saveGroupedSampleInfo(grouped, currentOrg.Uid, currentOrg.Name);
+                this.bg.updateTask(uploadTaskId, { done: groupsList.length, total, detail: `${groupsList.length}/${total} groups uploaded` });
+                this.bg.completeTask(uploadTaskId, 'Upload complete');
+            }
             if (total === 0) { this.snackBar.open('Nothing to recompute.', 'OK', { duration: 2000, verticalPosition: 'top' }); return; }
             if (shouldWaitForEf) {
                 const efTaskId = this.bg.startTask({ label: 'Computing exceedance fractions', detail: `${total} exposure group(s)`, kind: 'compute', total });
@@ -112,16 +166,18 @@ export class DataService {
                 }, 600000).then(res => {
                     if (res.timedOut) this.bg.failTask(efTaskId, 'Timed out'); else this.bg.completeTask(efTaskId, 'Recompute complete');
                 }).catch(() => this.bg.failTask(efTaskId, 'Error'));
-                this.snackBar.open(`Imported ${total} groups. EF will compute in the background.`, 'OK', { duration: 4000, verticalPosition: 'top' });
+                this.snackBar.open(`Imported ${total} groups. EF vwill compute in the background.`, 'OK', { duration: 4000, verticalPosition: 'top' });
             }
         } catch (e: any) {
             try { progressSnackRef?.dismiss(); } catch { }
-            const partial = String(e?.code || '').includes('PARTIAL_UPLOAD_FAILED') || String(e?.message || '').includes('Some groups failed to upload');
+            const code = String(e?.code || '');
+            const partial = code.includes('PARTIAL_UPLOAD_FAILED') || String(e?.message || '').includes('Some groups failed to upload');
             this.bg.failTask(uploadTaskId, partial ? 'Partial upload failed' : 'Upload failed');
             const msg = ((): string => {
                 const text = String(e?.message || e || '');
                 if (text.includes('AUTH_REQUIRED')) return 'Please sign in to save data.';
                 if (text.includes('Missing or insufficient permissions') || text.includes('PERMISSION_DENIED')) return 'You do not have permission to save to this organization.';
+                if (code === 'internal') return 'Server import failed. The upload was too large or timed out. We now split into smaller batches automatically; please try again.';
                 if (partial) return text;
                 return 'Save failed. Please try again.';
             })();

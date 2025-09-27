@@ -8,7 +8,7 @@
  */
 
 import { onDocumentWritten } from "firebase-functions/v2/firestore";
-import { onCall } from "firebase-functions/v2/https";
+import { onCall, HttpsError } from "firebase-functions/v2/https";
 import * as logger from "firebase-functions/logger";
 import * as admin from "firebase-admin";
 import { getFirestore, Timestamp, FieldValue } from 'firebase-admin/firestore';
@@ -197,31 +197,31 @@ export const recomputeExceedanceFraction = onDocumentWritten("organizations/{org
     logger.info(`Recomputed EF (parent-trigger) for organizations/${orgId}/exposureGroups/${docId}`);
 });
 
-// Maintain a total count of results on the parent doc using subcollection writes
-export const maintainResultsTotalCount = onDocumentWritten("organizations/{orgId}/exposureGroups/{groupId}/results/{resultId}", async (event: any) => {
-    const orgId = event.params.orgId as string;
-    const groupId = event.params.groupId as string;
-    const beforeExists = !!event.data?.before?.exists;
-    const afterExists = !!event.data?.after?.exists;
-    if (beforeExists === afterExists) {
-        // Pure update, no net count change
-        return;
-    }
-    const db = getFirestore();
-    const parentRef = db.doc(`organizations/${orgId}/exposureGroups/${groupId}`);
-    // Skip count increments while Importing is true to avoid excessive parent writes
-    try {
-        const parentSnap = await parentRef.get();
-        const parentData = parentSnap.exists ? (parentSnap.data() || {}) : {};
-        if (parentData?.Importing) {
-            logger.info(`ResultsTotalCount skipped due to Importing for org ${orgId} group ${groupId}`);
-            return;
-        }
-    } catch { /* ignore and proceed */ }
-    const delta = (!beforeExists && afterExists) ? 1 : -1;
-    await parentRef.set({ ResultsTotalCount: FieldValue.increment(delta) }, { merge: true });
-    logger.info(`ResultsTotalCount ${delta > 0 ? '++' : '--'} for org ${orgId} group ${groupId}`);
-});
+// // Maintain a total count of results on the parent doc using subcollection writes
+// export const maintainResultsTotalCount = onDocumentWritten("organizations/{orgId}/exposureGroups/{groupId}/results/{resultId}", async (event: any) => {
+//     const orgId = event.params.orgId as string;
+//     const groupId = event.params.groupId as string;
+//     const beforeExists = !!event.data?.before?.exists;
+//     const afterExists = !!event.data?.after?.exists;
+//     if (beforeExists === afterExists) {
+//         // Pure update, no net count change
+//         return;
+//     }
+//     const db = getFirestore();
+//     const parentRef = db.doc(`organizations/${orgId}/exposureGroups/${groupId}`);
+//     // Skip count increments while Importing is true to avoid excessive parent writes
+//     try {
+//         const parentSnap = await parentRef.get();
+//         const parentData = parentSnap.exists ? (parentSnap.data() || {}) : {};
+//         if (parentData?.Importing) {
+//             logger.info(`ResultsTotalCount skipped due to Importing for org ${orgId} group ${groupId}`);
+//             return;
+//         }
+//     } catch { /* ignore and proceed */ }
+//     const delta = (!beforeExists && afterExists) ? 1 : -1;
+//     await parentRef.set({ ResultsTotalCount: FieldValue.increment(delta) }, { merge: true });
+//     logger.info(`ResultsTotalCount ${delta > 0 ? '++' : '--'} for org ${orgId} group ${groupId}`);
+// });
 
 // Recompute EF when results subcollection changes: read latest 6, compute EF, update parent doc
 export const recomputeEfOnResultsWrite = onDocumentWritten("organizations/{orgId}/exposureGroups/{groupId}/results/{resultId}", async (event: any) => {
@@ -234,7 +234,6 @@ export const recomputeEfOnResultsWrite = onDocumentWritten("organizations/{orgId
         const parentSnap = await parentRef.get();
         const parentData = parentSnap.exists ? (parentSnap.data() || {}) : {};
         if (parentData?.Importing) {
-            logger.info(`Results recompute skipped due to Importing flag for org ${orgId} group ${groupId}`);
             return;
         }
         // Debounce: if LatestExceedanceFraction was just updated very recently, skip this run
@@ -335,175 +334,334 @@ export const recomputeEfBatch = onCall(async (request) => {
     return { ok: true, count: groupIds.length };
 });
 
-// --- Audit logs (write-once by Functions) ---
-type AuditLog = {
-    // ISO timestamp when the edit occurred (server time)
-    at: string;
-    actorUid?: string;
-    editedBy?: string;
-    action: 'create' | 'update' | 'delete';
-    documentPath: string;
-    collection: string;
-    docId: string;
-    diff?: any;
-    source?: string;
-    batchId?: string;
-    expireAt?: admin.firestore.Timestamp;
-};
-
-function computeDiff(before: any, after: any) {
-    // If entire object created or deleted, show full added object or a removedAll flag
-    if (!before && after) return { added: after };
-    if (before && !after) return { removedAll: true };
-
-    const isPlainObject = (val: any) => val !== null && typeof val === 'object' && !Array.isArray(val);
-
-    function summarizeValue(v: any) {
-        if (Array.isArray(v)) {
-            return {
-                _type: "array",
-                latest: v.slice(0, Math.min(1, v.length)),
-            };
-        }
-        return v;
+// HTTPS callable: bulk import results using Firestore BulkWriter for speed
+export const bulkImportResults = onCall({ timeoutSeconds: 540, memory: '1GiB' }, async (request) => {
+    const { orgId, organizationName, groups } = request.data || {};
+    const uid = request.auth?.uid || 'system';
+    if (!orgId || !Array.isArray(groups) || groups.length === 0) {
+        throw new HttpsError('invalid-argument', 'orgId and groups[] required');
     }
-
-    function diffArrays(bArr: any[], aArr: any[]) {
-        try {
-            const same = JSON.stringify(bArr) === JSON.stringify(aArr);
-            if (same) return null;
-        } catch { /* ignore stringify errors */ }
-        return {
-            _type: 'array',
-            beforeLength: Array.isArray(bArr) ? bArr.length : undefined,
-            afterLength: Array.isArray(aArr) ? aArr.length : undefined,
-            latestBefore: Array.isArray(bArr) ? bArr.slice(0, Math.min(1, bArr.length)) : undefined,
-            latestAfter: Array.isArray(aArr) ? aArr.slice(0, Math.min(1, aArr.length)) : undefined,
-        };
-    }
-
-    function diffValues(bv: any, av: any): any | null {
-        if (bv === undefined && av !== undefined) return { added: summarizeValue(av) };
-        if (bv !== undefined && av === undefined) return { removed: summarizeValue(bv) };
-        if (isPlainObject(bv) && isPlainObject(av)) return diffObjects(bv, av);
-        if (Array.isArray(bv) && Array.isArray(av)) return diffArrays(bv, av);
-        const same = ((): boolean => {
-            try { return JSON.stringify(bv) === JSON.stringify(av); } catch { return bv === av; }
-        })();
-        if (same) return null;
-        return { before: summarizeValue(bv), after: summarizeValue(av) };
-    }
-
-    function diffObjects(bObj: Record<string, any>, aObj: Record<string, any>) {
-        const changed: any = {};
-        const added: Record<string, any> = {};
-        const removed: Record<string, any> = {};
-        const keys = new Set([...Object.keys(bObj || {}), ...Object.keys(aObj || {})]);
-        for (const k of keys) {
-            const hasB = Object.prototype.hasOwnProperty.call(bObj || {}, k);
-            const hasA = Object.prototype.hasOwnProperty.call(aObj || {}, k);
-            if (!hasB && hasA) { added[k] = summarizeValue(aObj[k]); continue; }
-            if (hasB && !hasA) { removed[k] = summarizeValue(bObj[k]); continue; }
-            const child = diffValues(bObj[k], aObj[k]);
-            if (child) changed[k] = child;
-        }
-        return { changed, added, removed };
-    }
-
-    return diffObjects(before || {}, after || {});
-}
-
-const RETENTION_DAYS = parseInt(process.env.AUDIT_TTL_DAYS || '365', 10) * 2;
-
-async function writeAudit(orgId: string, collection: string, docId: string, before: any, after: any) {
-    return true;
     const db = getFirestore();
-    const path = `organizations/${orgId}/${collection}/${docId}`;
-    const action: 'create' | 'update' | 'delete' = !before && after ? 'create' : before && !after ? 'delete' : 'update';
-    const actorUid = after?.updatedBy || before?.updatedBy || undefined;
-    const expireAt = Timestamp.fromDate(new Date(Date.now() + RETENTION_DAYS * 24 * 60 * 60 * 1000));
-    const nowIso = new Date().toISOString();
-    const diff = computeDiff(before, after);
+    const jobId = `job_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const jobRef = db.doc(`organizations/${orgId}/importJobs/${jobId}`);
 
-    const log: AuditLog = {
-        at: nowIso,
-        actorUid,
-        editedBy: actorUid,
-        action,
-        documentPath: path,
-        collection,
-        docId,
-        diff,
-        source: 'function',
-        expireAt,
+    type IncomingSample = { Location?: string; SampleNumber?: string | number | null; SampleDate?: string; ExposureGroup?: string; Agent?: string; TWA?: number | string | null; Notes?: string };
+    type GroupIn = { groupName: string; samples: IncomingSample[] };
+
+    const slugify = (text: string): string => (text || '').toLowerCase().trim().replace(/\s+/g, '-').replace(/[^a-z0-9\-]/g, '').replace(/-+/g, '-').slice(0, 120);
+    const sanitize = (r: any) => {
+        const sampleNumber = r?.SampleNumber;
+        const twaRaw = r?.TWA;
+        const twa = (twaRaw === '' || twaRaw === undefined || twaRaw === null) ? null : Number(twaRaw);
+        return {
+            Location: r?.Location ?? "",
+            SampleNumber: (sampleNumber === undefined || sampleNumber === '') ? null : sampleNumber,
+            SampleDate: r?.SampleDate ?? "",
+            ExposureGroup: r?.ExposureGroup ?? "",
+            Agent: r?.Agent ?? "",
+            TWA: twa,
+            Notes: r?.Notes ?? "",
+        } as IncomingSample;
     };
 
+    // Prepare parent refs and existence (single getAll fetch)
+    const parents = (groups as GroupIn[]).map(g => ({ id: slugify(g.groupName), groupName: g.groupName, ref: db.doc(`organizations/${orgId}/exposureGroups/${slugify(g.groupName)}`) }));
+    let existing = new Set<string>();
     try {
-        const ref = await db.collection(`organizations/${orgId}/auditLogs`).add(log as any);
-        logger.info('Audit log written', { orgId, collection, docId, logId: ref.id, action });
-        return ref.id as string;
-    } catch (err: any) {
-        logger.error('Failed to write audit log', {
-            orgId,
-            collection,
-            docId,
-            action,
-            error: err?.message || String(err),
-            stack: err?.stack,
+        const snaps = await db.getAll(...parents.map(p => p.ref));
+        snaps.forEach(s => { if (s.exists) existing.add(s.id); });
+    } catch (e) {
+        logger.info('bulkImportResults: getAll failed; proceeding without existence optimization', { error: (e as any)?.message || String(e) });
+        existing = new Set();
+    }
+
+    // Initialize job doc
+    try {
+        const totalRows = (groups as GroupIn[]).reduce((sum, g) => sum + (g.samples?.length || 0), 0);
+        await jobRef.set({
+            status: 'running',
+            phase: 'initializing',
+            totalGroups: parents.length,
+            totalRows,
+            groupsProcessed: 0,
+            rowsWritten: 0,
+            startedAt: Timestamp.now(),
+            updatedAt: Timestamp.now(),
+            createdBy: uid,
+        }, { merge: true });
+    } catch (e) { logger.warn('bulkImportResults: failed to init job doc', { error: (e as any)?.message || String(e) }); }
+
+    // Phase 1: set Importing true on all parents
+    {
+        const writer = db.bulkWriter();
+        parents.forEach(p => {
+            const base: any = {
+                OrganizationUid: orgId,
+                OrganizationName: organizationName || null,
+                Group: p.groupName,
+                ExposureGroup: p.groupName,
+                Importing: true,
+                updatedAt: Timestamp.now(),
+                updatedBy: uid,
+            };
+            if (!existing.has(p.id)) {
+                base.createdAt = Timestamp.now();
+                base.createdBy = uid;
+            }
+            writer.set(p.ref, base, { merge: true });
         });
-        throw err;
+        try {
+            await writer.close();
+        } catch (e: any) {
+            logger.error('bulkImportResults Phase 1 failed', { error: e?.message || String(e) });
+            try { await jobRef.set({ status: 'failed', phase: 'initializing', error: String(e?.message || e), updatedAt: Timestamp.now() }, { merge: true }); } catch { }
+            throw new HttpsError('internal', 'Failed to initialize import (phase 1).');
+        }
+        try { await jobRef.set({ phase: 'writing', updatedAt: Timestamp.now() }, { merge: true }); } catch { }
     }
-}
 
-export const auditExposureGroups = onDocumentWritten("organizations/{orgId}/exposureGroups/{docId}", async (event: any) => {
-
-    return true;
-    const orgId = event.params.orgId as string;
-    const docId = event.params.docId as string;
-    const beforeExists = !!event.data?.before?.exists;
-    const afterExists = !!event.data?.after?.exists;
-    const before = event.data?.before?.data() as any | undefined;
-    const after = event.data?.after?.data() as any | undefined;
-
-    logger.info('auditExposureGroups fired', {
-        orgId,
-        docId,
-        beforeExists,
-        afterExists,
-        FIRESTORE_EMULATOR_HOST: process.env.FIRESTORE_EMULATOR_HOST || 'not-set',
-    });
-
-    try {
-        const logId = await writeAudit(orgId, 'exposureGroups', docId, before, after);
-        logger.info('auditExposureGroups success', { orgId, docId, logId });
-    } catch (err: any) {
-        logger.error('auditExposureGroups error', { orgId, docId, error: err?.message || String(err) });
-        // Rethrow to surface in emulator logs as failed invocation
-        throw err;
+    // Phase 2: write results rows for each group via BulkWriter
+    let resultsCount = 0;
+    let failuresCount = 0;
+    {
+        const writer = db.bulkWriter();
+        let buffered = 0;
+        const flushProgress = async () => {
+            try { await jobRef.set({ rowsWritten: resultsCount, failures: failuresCount, updatedAt: Timestamp.now() }, { merge: true }); } catch { }
+        };
+        // Count successes and periodically flush
+        writer.onWriteResult?.(() => {
+            resultsCount += 1;
+            buffered += 1;
+            if (buffered % 100 === 0) { void flushProgress(); }
+        });
+        // Capture errors and continue (with limited retries default)
+        (writer as any).onWriteError?.((err: any) => {
+            failuresCount += 1;
+            logger.error('BulkWriter write error', { code: err?.code, message: err?.message, documentRef: err?.documentRef?.path, failedAttempts: err?.failedAttempts });
+            // Let the SDK decide retries; returning false stops additional retries
+            if (typeof err?.failedAttempts === 'number' && err.failedAttempts < 5) {
+                return true;
+            }
+            return false;
+        });
+        (groups as GroupIn[]).forEach(g => {
+            const groupId = slugify(g.groupName);
+            const resultsCol = db.collection(`organizations/${orgId}/exposureGroups/${groupId}/results`);
+            const rows = (g.samples || []).map(sanitize);
+            rows.forEach((s, j) => {
+                const rawId = `${s.SampleNumber || ''}-${s.SampleDate || ''}-${s.TWA || ''}-${j}`.toLowerCase();
+                const id = rawId.replace(/[^a-z0-9\-]/g, '').slice(0, 120) || `${Date.now()}-${j}`;
+                const ref = resultsCol.doc(id);
+                const payload: any = {
+                    ...s,
+                    Group: g.groupName,
+                    ExposureGroup: g.groupName,
+                    createdAt: Timestamp.now(),
+                    createdBy: uid,
+                    updatedAt: Timestamp.now(),
+                    updatedBy: uid,
+                };
+                writer.set(ref, payload, { merge: true });
+            });
+        });
+        try {
+            await writer.close();
+        } catch (e: any) {
+            logger.error('bulkImportResults Phase 2 failed', { error: e?.message || String(e) });
+            try { await jobRef.set({ status: 'failed', phase: 'writing', rowsWritten: resultsCount, failures: failuresCount, error: String(e?.message || e), updatedAt: Timestamp.now() }, { merge: true }); } catch { }
+            throw new HttpsError('internal', 'Failed to write results (phase 2).');
+        }
+        try { await flushProgress(); } catch { }
     }
+
+    // Phase 3: clear Importing on parents (triggers recompute)
+    {
+        const writer = db.bulkWriter();
+        parents.forEach(p => {
+            writer.set(p.ref, { Importing: false, updatedAt: Timestamp.now(), updatedBy: uid }, { merge: true });
+        });
+        try {
+            await writer.close();
+        } catch (e: any) {
+            logger.error('bulkImportResults Phase 3 failed', { error: e?.message || String(e) });
+            try { await jobRef.set({ status: 'failed', phase: 'finalizing', rowsWritten: resultsCount, failures: failuresCount, error: String(e?.message || e), updatedAt: Timestamp.now() }, { merge: true }); } catch { }
+            throw new HttpsError('internal', 'Failed to finalize import (phase 3).');
+        }
+    }
+    try { await jobRef.set({ status: failuresCount > 0 ? 'completed-with-errors' : 'completed', phase: 'done', rowsWritten: resultsCount, failures: failuresCount, groupsProcessed: parents.length, completedAt: Timestamp.now(), updatedAt: Timestamp.now() }, { merge: true }); } catch { }
+    return { ok: true, groups: parents.length, results: resultsCount, failures: failuresCount, jobId };
 });
 
-export const auditAgents = onDocumentWritten("organizations/{orgId}/agents/{docId}", async (event: any) => {
-    const orgId = event.params.orgId as string;
-    const docId = event.params.docId as string;
-    const beforeExists = !!event.data?.before?.exists;
-    const afterExists = !!event.data?.after?.exists;
-    const before = event.data?.before?.data() as any | undefined;
-    const after = event.data?.after?.data() as any | undefined;
+// // --- Audit logs (write-once by Functions) ---
+// type AuditLog = {
+//     // ISO timestamp when the edit occurred (server time)
+//     at: string;
+//     actorUid?: string;
+//     editedBy?: string;
+//     action: 'create' | 'update' | 'delete';
+//     documentPath: string;
+//     collection: string;
+//     docId: string;
+//     diff?: any;
+//     source?: string;
+//     batchId?: string;
+//     expireAt?: admin.firestore.Timestamp;
+// };
 
-    logger.info('auditAgents fired', {
-        orgId,
-        docId,
-        beforeExists,
-        afterExists,
-        FIRESTORE_EMULATOR_HOST: process.env.FIRESTORE_EMULATOR_HOST || 'not-set',
-    });
+// function computeDiff(before: any, after: any) {
+//     // If entire object created or deleted, show full added object or a removedAll flag
+//     if (!before && after) return { added: after };
+//     if (before && !after) return { removedAll: true };
 
-    try {
-        const logId = await writeAudit(orgId, 'agents', docId, before, after);
-        logger.info('auditAgents success', { orgId, docId, logId });
-    } catch (err: any) {
-        logger.error('auditAgents error', { orgId, docId, error: err?.message || String(err) });
-        throw err;
-    }
-});
+//     const isPlainObject = (val: any) => val !== null && typeof val === 'object' && !Array.isArray(val);
+
+//     function summarizeValue(v: any) {
+//         if (Array.isArray(v)) {
+//             return {
+//                 _type: "array",
+//                 latest: v.slice(0, Math.min(1, v.length)),
+//             };
+//         }
+//         return v;
+//     }
+
+//     function diffArrays(bArr: any[], aArr: any[]) {
+//         try {
+//             const same = JSON.stringify(bArr) === JSON.stringify(aArr);
+//             if (same) return null;
+//         } catch { /* ignore stringify errors */ }
+//         return {
+//             _type: 'array',
+//             beforeLength: Array.isArray(bArr) ? bArr.length : undefined,
+//             afterLength: Array.isArray(aArr) ? aArr.length : undefined,
+//             latestBefore: Array.isArray(bArr) ? bArr.slice(0, Math.min(1, bArr.length)) : undefined,
+//             latestAfter: Array.isArray(aArr) ? aArr.slice(0, Math.min(1, aArr.length)) : undefined,
+//         };
+//     }
+
+//     function diffValues(bv: any, av: any): any | null {
+//         if (bv === undefined && av !== undefined) return { added: summarizeValue(av) };
+//         if (bv !== undefined && av === undefined) return { removed: summarizeValue(bv) };
+//         if (isPlainObject(bv) && isPlainObject(av)) return diffObjects(bv, av);
+//         if (Array.isArray(bv) && Array.isArray(av)) return diffArrays(bv, av);
+//         const same = ((): boolean => {
+//             try { return JSON.stringify(bv) === JSON.stringify(av); } catch { return bv === av; }
+//         })();
+//         if (same) return null;
+//         return { before: summarizeValue(bv), after: summarizeValue(av) };
+//     }
+
+//     function diffObjects(bObj: Record<string, any>, aObj: Record<string, any>) {
+//         const changed: any = {};
+//         const added: Record<string, any> = {};
+//         const removed: Record<string, any> = {};
+//         const keys = new Set([...Object.keys(bObj || {}), ...Object.keys(aObj || {})]);
+//         for (const k of keys) {
+//             const hasB = Object.prototype.hasOwnProperty.call(bObj || {}, k);
+//             const hasA = Object.prototype.hasOwnProperty.call(aObj || {}, k);
+//             if (!hasB && hasA) { added[k] = summarizeValue(aObj[k]); continue; }
+//             if (hasB && !hasA) { removed[k] = summarizeValue(bObj[k]); continue; }
+//             const child = diffValues(bObj[k], aObj[k]);
+//             if (child) changed[k] = child;
+//         }
+//         return { changed, added, removed };
+//     }
+
+//     return diffObjects(before || {}, after || {});
+// }
+
+// const RETENTION_DAYS = parseInt(process.env.AUDIT_TTL_DAYS || '365', 10) * 2;
+
+// async function writeAudit(orgId: string, collection: string, docId: string, before: any, after: any) {
+//     return true;
+//     const db = getFirestore();
+//     const path = `organizations/${orgId}/${collection}/${docId}`;
+//     const action: 'create' | 'update' | 'delete' = !before && after ? 'create' : before && !after ? 'delete' : 'update';
+//     const actorUid = after?.updatedBy || before?.updatedBy || undefined;
+//     const expireAt = Timestamp.fromDate(new Date(Date.now() + RETENTION_DAYS * 24 * 60 * 60 * 1000));
+//     const nowIso = new Date().toISOString();
+//     const diff = computeDiff(before, after);
+
+//     const log: AuditLog = {
+//         at: nowIso,
+//         actorUid,
+//         editedBy: actorUid,
+//         action,
+//         documentPath: path,
+//         collection,
+//         docId,
+//         diff,
+//         source: 'function',
+//         expireAt,
+//     };
+
+//     try {
+//         const ref = await db.collection(`organizations/${orgId}/auditLogs`).add(log as any);
+//         logger.info('Audit log written', { orgId, collection, docId, logId: ref.id, action });
+//         return ref.id as string;
+//     } catch (err: any) {
+//         logger.error('Failed to write audit log', {
+//             orgId,
+//             collection,
+//             docId,
+//             action,
+//             error: err?.message || String(err),
+//             stack: err?.stack,
+//         });
+//         throw err;
+//     }
+// }
+
+// export const auditExposureGroups = onDocumentWritten("organizations/{orgId}/exposureGroups/{docId}", async (event: any) => {
+
+//     return true;
+//     const orgId = event.params.orgId as string;
+//     const docId = event.params.docId as string;
+//     const beforeExists = !!event.data?.before?.exists;
+//     const afterExists = !!event.data?.after?.exists;
+//     const before = event.data?.before?.data() as any | undefined;
+//     const after = event.data?.after?.data() as any | undefined;
+
+//     logger.info('auditExposureGroups fired', {
+//         orgId,
+//         docId,
+//         beforeExists,
+//         afterExists,
+//         FIRESTORE_EMULATOR_HOST: process.env.FIRESTORE_EMULATOR_HOST || 'not-set',
+//     });
+
+//     try {
+//         const logId = await writeAudit(orgId, 'exposureGroups', docId, before, after);
+//         logger.info('auditExposureGroups success', { orgId, docId, logId });
+//     } catch (err: any) {
+//         logger.error('auditExposureGroups error', { orgId, docId, error: err?.message || String(err) });
+//         // Rethrow to surface in emulator logs as failed invocation
+//         throw err;
+//     }
+// });
+
+// export const auditAgents = onDocumentWritten("organizations/{orgId}/agents/{docId}", async (event: any) => {
+//     const orgId = event.params.orgId as string;
+//     const docId = event.params.docId as string;
+//     const beforeExists = !!event.data?.before?.exists;
+//     const afterExists = !!event.data?.after?.exists;
+//     const before = event.data?.before?.data() as any | undefined;
+//     const after = event.data?.after?.data() as any | undefined;
+
+//     logger.info('auditAgents fired', {
+//         orgId,
+//         docId,
+//         beforeExists,
+//         afterExists,
+//         FIRESTORE_EMULATOR_HOST: process.env.FIRESTORE_EMULATOR_HOST || 'not-set',
+//     });
+
+//     try {
+//         const logId = await writeAudit(orgId, 'agents', docId, before, after);
+//         logger.info('auditAgents success', { orgId, docId, logId });
+//     } catch (err: any) {
+//         logger.error('auditAgents error', { orgId, docId, error: err?.message || String(err) });
+//         throw err;
+//     }
+// });

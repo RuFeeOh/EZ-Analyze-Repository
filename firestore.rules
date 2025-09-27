@@ -102,6 +102,12 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // Import job progress (read-only for org members). Writes are by Cloud Functions only.
+    match /organizations/{orgId}/importJobs/{jobId} {
+      allow read: if isUserInOrganization(get(/databases/$(database)/documents/organizations/$(orgId)));
+      allow write: if false;
+    }
+
     match /breakdownTask/{task} {
       allow read, write: if isCreator();
       allow list: if isCreator();
