@@ -23,7 +23,7 @@ export class ExposureGroupsComponent {
     readonly detailForFn = (group: any) => group?.Results ?? [];
 
     constructor() {
-        const orgId = this.orgService.currentOrg?.Uid || 'unknown';
+        const orgId = this.orgService.orgStore.currentOrg()?.Uid || 'unknown';
         const refShared = collection(this.firestore, `organizations/${orgId}/exposureGroups`);
         this.exposureGroups$ = collectionData(refShared as any, { idField: 'Uid' }).pipe(map(d => d as any[]));
     }

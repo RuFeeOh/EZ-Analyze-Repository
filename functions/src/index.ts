@@ -1,6 +1,6 @@
 /**
  * Import function triggers from their respective submodules:
- *
+    const jobRef = db.doc(`organizations/${orgId}/importJobs/${jobId}`);
  * import {onCall} from "firebase-functions/v2/https";
  * import {onDocumentWritten} from "firebase-functions/v2/firestore";
  *
@@ -108,6 +108,12 @@ export const recomputeExceedanceFraction = onDocumentWritten("organizations/{org
         return;
     }
 
+    // If bulk import already computed EF in this same write, skip
+    if (after?.EFComputedAt && after?.updatedAt && String(after.EFComputedAt) === String(after.updatedAt)) {
+        logger.info(`EF trigger: precomputed EF detected, skipping for ${docId}`);
+        return;
+    }
+
     // Determine if we should recompute:
     // - EF is missing, OR
     // - Importing transitioned true -> false, OR
@@ -190,13 +196,80 @@ export const recomputeExceedanceFraction = onDocumentWritten("organizations/{org
         const payload: any = {
             LatestExceedanceFraction: latest,
             ExceedanceFractionHistory: updatedHistory,
-            Results: mostRecent, // keep small preview for UI
+            ResultsPreview: mostRecent, // keep small preview for UI without overwriting bulk Results array
         };
         if (typeof totalCount === 'number') payload.ResultsTotalCount = totalCount;
         tx.set(ref, payload, { merge: true });
     });
 
     logger.info(`Recomputed EF (parent-trigger) for organizations/${orgId}/exposureGroups/${docId}`);
+});
+
+// --- Sync org membership into users/{uid} docs ---
+// (Removed membership sync triggers now that create/delete use callables)
+
+// --- Callable: createOrganization ---
+export const createOrganization = onCall(async (request) => {
+    const uid = request.auth?.uid;
+    const { name } = request.data || {};
+    if (!uid) throw new HttpsError('unauthenticated', 'Authentication required');
+    if (!name || typeof name !== 'string' || !name.trim()) {
+        throw new HttpsError('invalid-argument', 'Organization name required');
+    }
+    const db = getFirestore();
+    const orgRef = db.collection('organizations').doc();
+    const now = Timestamp.now();
+    const orgData = {
+        Name: name.trim(),
+        UserUids: [uid],
+        Permissions: { [uid]: { assignPermissions: true } },
+        createdAt: now,
+        createdBy: uid,
+        updatedAt: now,
+        updatedBy: uid,
+    };
+    // Mirror membership to user doc in same batch/transaction
+    await db.runTransaction(async (tx: any) => {
+        tx.set(orgRef, orgData, { merge: true });
+        const userRef = db.doc(`users/${uid}`);
+        tx.set(userRef, {
+            [`orgMemberships.${orgRef.id}`]: { assignPermissions: true, name: orgData.Name },
+            orgIds: FieldValue.arrayUnion(orgRef.id),
+            updatedAt: now,
+        }, { merge: true });
+    });
+    return { orgId: orgRef.id, name: orgData.Name };
+});
+
+// --- Callable: deleteOrganization ---
+export const deleteOrganization = onCall(async (request) => {
+    const uid = request.auth?.uid;
+    const { orgId } = request.data || {};
+    if (!uid) throw new HttpsError('unauthenticated', 'Authentication required');
+    if (!orgId || typeof orgId !== 'string') throw new HttpsError('invalid-argument', 'orgId required');
+    const db = getFirestore();
+    const orgRef = db.doc(`organizations/${orgId}`);
+    const snap = await orgRef.get();
+    if (!snap.exists) throw new HttpsError('not-found', 'Organization not found');
+    const data = snap.data() || {} as any;
+    // Only members with assignPermissions true can delete
+    const can = !!data?.Permissions?.[uid]?.assignPermissions;
+    if (!can) throw new HttpsError('permission-denied', 'Not authorized to delete organization');
+    const userUids: string[] = (data.UserUids || []).filter((x: any) => typeof x === 'string');
+    const writer = (db as any).bulkWriter ? (db as any).bulkWriter() : null;
+    // Delete org and update users
+    await orgRef.delete();
+    for (const memberUid of userUids) {
+        const userRef = db.doc(`users/${memberUid}`);
+        const payload: any = {
+            [`orgMemberships.${orgId}`]: FieldValue.delete(),
+            orgIds: FieldValue.arrayRemove(orgId),
+            updatedAt: Timestamp.now(),
+        };
+        if (writer) writer.set(userRef, payload, { merge: true }); else await userRef.set(payload, { merge: true });
+    }
+    if (writer) await writer.close();
+    return { deleted: true, orgId };
 });
 
 // // Maintain a total count of results on the parent doc using subcollection writes
@@ -393,106 +466,57 @@ export const bulkImportResults = onCall({ timeoutSeconds: 540, memory: '1GiB' },
         }, { merge: true });
     } catch (e) { logger.warn('bulkImportResults: failed to init job doc', { error: (e as any)?.message || String(e) }); }
 
-    // Phase 1: set Importing true on all parents
-    {
-        const writer = db.bulkWriter();
-        parents.forEach(p => {
-            const base: any = {
-                OrganizationUid: orgId,
-                OrganizationName: organizationName || null,
-                Group: p.groupName,
-                ExposureGroup: p.groupName,
-                Importing: true,
-                updatedAt: Timestamp.now(),
-                updatedBy: uid,
-            };
-            if (!existing.has(p.id)) {
-                base.createdAt = Timestamp.now();
-                base.createdBy = uid;
-            }
-            writer.set(p.ref, base, { merge: true });
-        });
-        try {
-            await writer.close();
-        } catch (e: any) {
-            logger.error('bulkImportResults Phase 1 failed', { error: e?.message || String(e) });
-            try { await jobRef.set({ status: 'failed', phase: 'initializing', error: String(e?.message || e), updatedAt: Timestamp.now() }, { merge: true }); } catch { }
-            throw new HttpsError('internal', 'Failed to initialize import (phase 1).');
-        }
-        try { await jobRef.set({ phase: 'writing', updatedAt: Timestamp.now() }, { merge: true }); } catch { }
-    }
-
-    // Phase 2: write results rows for each group via BulkWriter
+    // For each group, upsert parent doc with all results as an array
     let resultsCount = 0;
     let failuresCount = 0;
-    {
-        const writer = db.bulkWriter();
-        let buffered = 0;
-        const flushProgress = async () => {
-            try { await jobRef.set({ rowsWritten: resultsCount, failures: failuresCount, updatedAt: Timestamp.now() }, { merge: true }); } catch { }
-        };
-        // Count successes and periodically flush
-        writer.onWriteResult?.(() => {
-            resultsCount += 1;
-            buffered += 1;
-            if (buffered % 100 === 0) { void flushProgress(); }
-        });
-        // Capture errors and continue (with limited retries default)
-        (writer as any).onWriteError?.((err: any) => {
-            failuresCount += 1;
-            logger.error('BulkWriter write error', { code: err?.code, message: err?.message, documentRef: err?.documentRef?.path, failedAttempts: err?.failedAttempts });
-            // Let the SDK decide retries; returning false stops additional retries
-            if (typeof err?.failedAttempts === 'number' && err.failedAttempts < 5) {
-                return true;
-            }
-            return false;
-        });
-        (groups as GroupIn[]).forEach(g => {
-            const groupId = slugify(g.groupName);
-            const resultsCol = db.collection(`organizations/${orgId}/exposureGroups/${groupId}/results`);
-            const rows = (g.samples || []).map(sanitize);
-            rows.forEach((s, j) => {
-                const rawId = `${s.SampleNumber || ''}-${s.SampleDate || ''}-${s.TWA || ''}-${j}`.toLowerCase();
-                const id = rawId.replace(/[^a-z0-9\-]/g, '').slice(0, 120) || `${Date.now()}-${j}`;
-                const ref = resultsCol.doc(id);
-                const payload: any = {
-                    ...s,
-                    Group: g.groupName,
-                    ExposureGroup: g.groupName,
-                    createdAt: Timestamp.now(),
-                    createdBy: uid,
-                    updatedAt: Timestamp.now(),
-                    updatedBy: uid,
-                };
-                writer.set(ref, payload, { merge: true });
-            });
-        });
-        try {
-            await writer.close();
-        } catch (e: any) {
-            logger.error('bulkImportResults Phase 2 failed', { error: e?.message || String(e) });
-            try { await jobRef.set({ status: 'failed', phase: 'writing', rowsWritten: resultsCount, failures: failuresCount, error: String(e?.message || e), updatedAt: Timestamp.now() }, { merge: true }); } catch { }
-            throw new HttpsError('internal', 'Failed to write results (phase 2).');
-        }
-        try { await flushProgress(); } catch { }
-    }
+    for (const g of groups as GroupIn[]) {
+        const groupId = slugify(g.groupName);
+        const parentRef = db.doc(`organizations/${orgId}/exposureGroups/${groupId}`);
+        const rows = (g.samples || []).map(sanitize);
+        // Build EF from the incoming rows (most recent 6 with TWA>0)
+        const asSampleInfo: SampleInfo[] = (rows || []).map(r => ({
+            SampleDate: r.SampleDate || '',
+            ExposureGroup: r.ExposureGroup || g.groupName,
+            Group: g.groupName,
+            TWA: typeof r.TWA === 'number' ? r.TWA : Number(r.TWA || 0),
+            Notes: r.Notes,
+            SampleNumber: (r.SampleNumber === null || r.SampleNumber === undefined) ? undefined : r.SampleNumber,
+        }));
+        const mostRecent = getMostRecentSamples(asSampleInfo, 6);
+        const TWAlist = mostRecent.map(r => Number(r.TWA)).filter(n => n > 0);
+        const efVal = (TWAlist.length >= 2) ? calculateExceedanceProbability(TWAlist, 0.05) : 0;
+        const latestEf = createExceedanceFraction(efVal, mostRecent, TWAlist);
+        const nowTs = Timestamp.now();
 
-    // Phase 3: clear Importing on parents (triggers recompute)
-    {
-        const writer = db.bulkWriter();
-        parents.forEach(p => {
-            writer.set(p.ref, { Importing: false, updatedAt: Timestamp.now(), updatedBy: uid }, { merge: true });
-        });
+        const payload: any = {
+            OrganizationUid: orgId,
+            OrganizationName: organizationName || null,
+            Group: g.groupName,
+            ExposureGroup: g.groupName,
+            Results: rows,
+            Importing: false,
+            updatedAt: nowTs,
+            updatedBy: uid,
+            // Precomputed EF fields
+            LatestExceedanceFraction: latestEf,
+            ExceedanceFractionHistory: FieldValue.arrayUnion(latestEf),
+            ResultsTotalCount: rows.length,
+            EFComputedAt: nowTs,
+        };
+        if (!existing.has(groupId)) {
+            payload.createdAt = nowTs;
+            payload.createdBy = uid;
+        }
         try {
-            await writer.close();
+            await parentRef.set(payload, { merge: true });
+            resultsCount += 1;
         } catch (e: any) {
-            logger.error('bulkImportResults Phase 3 failed', { error: e?.message || String(e) });
-            try { await jobRef.set({ status: 'failed', phase: 'finalizing', rowsWritten: resultsCount, failures: failuresCount, error: String(e?.message || e), updatedAt: Timestamp.now() }, { merge: true }); } catch { }
-            throw new HttpsError('internal', 'Failed to finalize import (phase 3).');
+            failuresCount += 1;
+            logger.error('bulkImportResults group write failed', { group: g.groupName, error: e?.message || String(e) });
         }
     }
     try { await jobRef.set({ status: failuresCount > 0 ? 'completed-with-errors' : 'completed', phase: 'done', rowsWritten: resultsCount, failures: failuresCount, groupsProcessed: parents.length, completedAt: Timestamp.now(), updatedAt: Timestamp.now() }, { merge: true }); } catch { }
-    return { ok: true, groups: parents.length, results: resultsCount, failures: failuresCount, jobId };
+    return { ok: true, groups: parents.length, results: resultsCount, failures: failuresCount, jobId: jobId };
 });
 
 // // --- Audit logs (write-once by Functions) ---

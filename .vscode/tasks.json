@@ -1,7 +1,40 @@
 {
-  // For more information, visit: https://go.microsoft.com/fwlink/?LinkId=733558
   "version": "2.0.0",
   "tasks": [
+    {
+      "label": "Start Functions Emulator (Debug)",
+      "type": "shell",
+      "command": "npm",
+      "args": [
+        "run",
+        "serve"
+      ],
+      "isBackground": true,
+      "options": {
+        "cwd": "${workspaceFolder}/functions",
+        "env": {
+          "FIREBASE_FUNCTIONS_EMULATOR_DEBUG_PORT": "9229"
+        }
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Start Functions Shell (Debug)",
+      "type": "shell",
+      "command": "npm",
+      "args": [
+        "run",
+        "shell"
+      ],
+      "isBackground": false,
+      "options": {
+        "cwd": "${workspaceFolder}/functions",
+        "env": {
+          "FIREBASE_FUNCTIONS_EMULATOR_DEBUG_PORT": "9229"
+        }
+      },
+      "problemMatcher": []
+    },
     {
       "label": "npm: start",
       "type": "shell",

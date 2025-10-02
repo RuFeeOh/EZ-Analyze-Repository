@@ -1,11 +1,15 @@
-import { computed, inject, Injectable, OnInit, Signal, EnvironmentInjector, runInInjectionContext } from '@angular/core';
+import { computed, inject, Injectable, OnInit, Signal, EnvironmentInjector, runInInjectionContext, WritableSignal, signal } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { collectionData } from '@angular/fire/firestore';
-import { collection, addDoc, where, query, doc, deleteDoc, setDoc } from 'firebase/firestore';
+import { collection, where, query, doc, setDoc } from 'firebase/firestore';
 import { catchError, map, Observable, of, switchMap, defer } from 'rxjs';
 import { Firestore } from '@angular/fire/firestore'
 import { Auth, user } from '@angular/fire/auth';
+import { httpsCallable } from '@angular/fire/functions';
+import { Functions } from '@angular/fire/functions';
 import { Organization } from '../../models/organization.model';
+import { OrganizationStore } from './organization.store';
+import { createInjectionContext } from '../../utils/create-injection-context.decorator';
 
 @Injectable({
   providedIn: 'root'
@@ -14,7 +18,9 @@ export class OrganizationService {
   private firestore = inject(Firestore);
   private auth = inject(Auth);
   private env = inject(EnvironmentInjector);
-  currentOrg: Organization | null = null;
+  private fns = inject(Functions);
+  public orgStore = inject(OrganizationStore);
+  storedOrg: WritableSignal<Organization | null> = signal(null);
   user$ = user(this.auth);
   private user = toSignal(this.user$, { initialValue: null });
   private get userUid() {
@@ -24,6 +30,18 @@ export class OrganizationService {
     switchMap(user => user ? this.getOrganizationList(user.uid ?? '') : of([]))
   )
   organizationList: Signal<any[]> = toSignal(this.organizationList$, { initialValue: [] })
+
+
+  currentOrg: Signal<Organization | null> = computed(() => {
+    // check if storedOrg is in the organizationList
+    const orgList = this.organizationList();
+    const stored = this.storedOrg();
+    if (stored && orgList.some(o => o.Uid === stored.Uid)) {
+      return stored;
+    }
+    // if not, return the first org in the list or null
+    return orgList.length > 0 ? orgList[0] : null;
+  });
 
   constructor() {
     this.loadCurrentOrganizationFromLocalStorage();
@@ -40,7 +58,6 @@ export class OrganizationService {
     const organizationCollection = collection(this.firestore, 'organizations');
     const userOrganizations = query(organizationCollection, where('UserUids', 'array-contains', uid));
 
-    // Ensure Angular injection/zone context when creating the Firebase observable
     const organizations$ = defer(() =>
       runInInjectionContext(this.env, () => collectionData(userOrganizations as any, { idField: 'Uid' }))
     );
@@ -55,12 +72,12 @@ export class OrganizationService {
   }
 
   setCurrentOrg(org: Organization) {
-    this.currentOrg = org;
+    this.orgStore.setCurrentOrg(org);
     localStorage.setItem('currentOrg', JSON.stringify(org));
   }
 
   clearCurrentOrg() {
-    this.currentOrg = null;
+    this.orgStore.clearCurrentOrg();
     localStorage.removeItem('currentOrg');
   }
 
@@ -69,27 +86,28 @@ export class OrganizationService {
     if (!userId) throw new Error('User not authenticated');
     if (!organizationName) throw new Error('Organization name is required');
 
-    const orgToSave = this.createNewOrgToSave(organizationName, userId);
-    const newMessageRef = await addDoc(
-      collection(this.firestore, "organizations"),
-      this.plainObject(orgToSave)
-    );
-    // Once the save is successful, set the current organization using the generated id
-    const orgWithUid = new Organization({ ...orgToSave, Uid: newMessageRef.id });
+    const result = await this.addOrganization(organizationName);
+    const orgWithUid = new Organization({ Name: result.data.name, Uid: result.data.orgId, UserUids: [userId], Permissions: { [userId]: { assignPermissions: true } } });
     this.setCurrentOrg(orgWithUid);
-    return newMessageRef;
+    return result.data;
+  }
+
+  @createInjectionContext()
+  private async addOrganization(orgName: string) {
+
+    const callable = httpsCallable<{ name: string }, { orgId: string; name: string }>(this.fns, 'createOrganization');
+    const result = await callable({ name: orgName });
+    return result;
   }
 
   public async deleteOrganization(orgId: string) {
     if (!orgId) throw new Error('Organization id is required');
-    const orgRef = doc(this.firestore as any, `organizations/${orgId}`);
-    await deleteDoc(orgRef as any);
-    if (this.currentOrg?.Uid === orgId) {
-      this.currentOrg = null;
-      localStorage.removeItem('currentOrg');
+    const callable = httpsCallable<{ orgId: string }, { deleted: boolean; orgId: string }>(this.fns, 'deleteOrganization');
+    await callable({ orgId });
+    if (this.orgStore.currentOrg()?.Uid === orgId) {
+      this.orgStore.clearCurrentOrg();
     }
   }
-
 
   private createNewOrgToSave(organizationName: string, userId: string) {
     return new Organization({
@@ -100,7 +118,6 @@ export class OrganizationService {
       }
     });
   }
-
 
   private plainObject<T>(obj: T): T {
     return JSON.parse(JSON.stringify(obj));

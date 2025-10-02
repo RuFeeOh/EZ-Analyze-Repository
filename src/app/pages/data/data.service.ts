@@ -39,7 +39,7 @@ export class DataService {
     }
 
     async save(context: SaveContext) {
-        const currentOrg = this.organizationservice.currentOrg;
+        const currentOrg = this.organizationservice.orgStore.currentOrg();
         if (!currentOrg) { this.snackBar.open('Please select an organization before uploading.', 'Dismiss', { duration: 5000, verticalPosition: 'top' }); return; }
         const uid = this.auth.currentUser?.uid;
         if (!uid) { this.snackBar.open('Please sign in to save data.', 'Dismiss', { duration: 4000, verticalPosition: 'top' }); return; }

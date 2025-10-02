@@ -38,7 +38,7 @@ export class AgentsComponent {
     agents$!: Observable<AgentView[]>;
 
     constructor() {
-        const orgId = this.orgService.currentOrg?.Uid || 'unknown';
+        const orgId = this.orgService.orgStore.currentOrg()?.Uid || 'unknown';
         const agents$ = this.agentService.list(orgId);
         const groups$ = collectionData(collection(this.firestore as any, `organizations/${orgId}/exposureGroups`) as any, { idField: 'Uid' }) as Observable<any[]>;
         this.agents$ = combineLatest([agents$, groups$]).pipe(
@@ -67,7 +67,7 @@ export class AgentsComponent {
         const result = await ref.afterClosed().toPromise();
         if (!result) return;
         try {
-            const orgId = this.orgService.currentOrg?.Uid;
+            const orgId = this.orgService.orgStore.currentOrg()?.Uid;
             if (!orgId) throw new Error('No org');
             await this.agentService.upsert(orgId, { Name: result.Name, OELNumber: Number(result.OELNumber) } as any);
             this.snack.open('Agent saved.', 'OK', { duration: 2000 });
@@ -81,7 +81,7 @@ export class AgentsComponent {
         const result = await ref.afterClosed().toPromise();
         if (!result) return;
         try {
-            const orgId = this.orgService.currentOrg?.Uid;
+            const orgId = this.orgService.orgStore.currentOrg()?.Uid;
             if (!orgId) throw new Error('No org');
             await this.agentService.upsert(orgId, { Name: result.Name, OELNumber: Number(result.EOLNumber ?? result.OELNumber) } as any);
             this.snack.open('Agent updated.', 'OK', { duration: 2000 });
@@ -93,7 +93,7 @@ export class AgentsComponent {
     async deleteAgent(a: AgentView) {
         if (!confirm(`Delete agent "${a.Name}"?`)) return;
         try {
-            const orgId = this.orgService.currentOrg?.Uid;
+            const orgId = this.orgService.orgStore.currentOrg()?.Uid;
             if (!orgId) throw new Error('No org');
             await this.agentService.remove(orgId, a.Name);
             this.snack.open('Agent deleted.', 'OK', { duration: 2000 });

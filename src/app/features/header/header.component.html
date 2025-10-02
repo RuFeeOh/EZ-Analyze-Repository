@@ -7,7 +7,7 @@
     </button>
     <span class="app-title">EZ Analyze</span>
     <span class="spacer"></span>
-    <organization-circle [org]="organizationService.currentOrg"
+    <organization-circle [org]="organizationService.orgStore.currentOrg()"
                          (orgClicked)="goToOrg()"></organization-circle>
     <button mat-button
             (click)="logout()">Logout</button>

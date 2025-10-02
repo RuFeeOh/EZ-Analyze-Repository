@@ -15,6 +15,28 @@
       "request": "launch",
       "preLaunchTask": "npm: test",
       "url": "http://localhost:9876/debug.html"
+    },
+    {
+      "name": "Attach to Functions (9229)",
+      "type": "node",
+      "request": "attach",
+      "port": 9229,
+      "restart": true,
+      "timeout": 20000,
+      "localRoot": "${workspaceFolder}/functions",
+      "remoteRoot": "${workspaceFolder}/functions",
+      "skipFiles": [
+        "<node_internals>/**"
+      ]
+    }
+  ],
+  "compounds": [
+    {
+      "name": "Debug Functions",
+      "configurations": [
+        "Attach to Functions (9229)"
+      ],
+      "preLaunchTask": "Start Functions Emulator (Debug)"
     }
   ]
 }

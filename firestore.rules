@@ -23,20 +23,27 @@ service cloud.firestore {
       allow delete: if isCreator();
     }
     
-    function isUserInOrganization(organizationResource) {
-      return request.auth != null
-        && organizationResource != null
-        && organizationResource.data != null
-        && organizationResource.data.UserUids != null
-        && request.auth.uid in organizationResource.data.UserUids;
+    function isUserInOrganization(orgId) {
+      return request.auth != null && (
+        (
+          exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.orgIds != null &&
+          orgId in get(/databases/$(database)/documents/users/$(request.auth.uid)).data.orgIds
+        ) || (
+          exists(/databases/$(database)/documents/organizations/$(orgId)) &&
+          get(/databases/$(database)/documents/organizations/$(orgId)).data.UserUids != null &&
+          request.auth.uid in get(/databases/$(database)/documents/organizations/$(orgId)).data.UserUids
+        )
+      );
     }
     match /organizations/{organization} {
-      // Permit authenticated users to fetch a single organization document so UI can check membership
-      // without leaking entire collections. Listing remains restricted to members only.
-      allow get: if isLoggedIn();
-      allow list: if isUserInOrganization(resource);
-      allow create: if isLoggedIn();
-      allow update, delete: if isUserInOrganization(resource);
+      // Allow reading an org only if the user is a member on that document.
+      allow read: if request.auth != null
+        && resource.data != null
+        && resource.data.UserUids != null
+        && request.auth.uid in resource.data.UserUids;
+      // Block direct client writes; organization lifecycle is managed by callables.
+      allow create, update, delete: if false;
     }
     // Legacy flat collection locked down (no access)
     match /exposureGroups/{exposureGroup} {
@@ -46,9 +53,9 @@ service cloud.firestore {
     // Scoped exposure groups under organization
     match /organizations/{orgId}/exposureGroups/{exposureGroup} {
       // Allow read/write if user is a member of the organization
-      allow get, list: if isUserInOrganization(get(/databases/$(database)/documents/organizations/$(orgId)));
+      allow get, list: if isUserInOrganization(orgId);
       // Create forbids EF fields
-      allow create: if isUserInOrganization(get(/databases/$(database)/documents/organizations/$(orgId)))
+      allow create: if isUserInOrganization(orgId)
         && !('LatestExceedanceFraction' in request.resource.data)
         && !('ExceedanceFractionHistory' in request.resource.data)
         && request.resource.data.createdBy == request.auth.uid
@@ -56,18 +63,18 @@ service cloud.firestore {
         && request.resource.data.updatedBy == request.auth.uid
         && request.resource.data.updatedAt == request.time;
       // Update forbids client changes to EF fields
-      allow update: if isUserInOrganization(get(/databases/$(database)/documents/organizations/$(orgId)))
+      allow update: if isUserInOrganization(orgId)
         && ( !('LatestExceedanceFraction' in request.resource.data) || request.resource.data.LatestExceedanceFraction == resource.data.LatestExceedanceFraction )
         && ( !('ExceedanceFractionHistory' in request.resource.data) || request.resource.data.ExceedanceFractionHistory == resource.data.ExceedanceFractionHistory );
       // Delete
-      allow delete: if isUserInOrganization(get(/databases/$(database)/documents/organizations/$(orgId)));
+      allow delete: if isUserInOrganization(orgId);
     }
 
     // Results subcollection under an exposure group (rows of samples)
     match /organizations/{orgId}/exposureGroups/{exposureGroup}/results/{resultId} {
-      allow get, list: if isUserInOrganization(get(/databases/$(database)/documents/organizations/$(orgId)));
+      allow get, list: if isUserInOrganization(orgId);
       // Members can create rows but must set audit fields and cannot touch EF fields
-      allow create: if isUserInOrganization(get(/databases/$(database)/documents/organizations/$(orgId)))
+      allow create: if isUserInOrganization(orgId)
         && request.resource.data.createdBy == request.auth.uid
         && request.resource.data.createdAt == request.time
         && request.resource.data.updatedBy == request.auth.uid
@@ -75,36 +82,36 @@ service cloud.firestore {
         && !('LatestExceedanceFraction' in request.resource.data)
         && !('ExceedanceFractionHistory' in request.resource.data);
       // Update allowed for fixing row values; must keep createdAt/By stable and update audit fields
-      allow update: if isUserInOrganization(get(/databases/$(database)/documents/organizations/$(orgId)))
+      allow update: if isUserInOrganization(orgId)
         && request.resource.data.updatedBy == request.auth.uid
         && request.resource.data.updatedAt == request.time
         && !('LatestExceedanceFraction' in request.resource.data)
         && !('ExceedanceFractionHistory' in request.resource.data);
-      allow delete: if isUserInOrganization(get(/databases/$(database)/documents/organizations/$(orgId)));
+      allow delete: if isUserInOrganization(orgId);
     }
     // Agents under organization
     match /organizations/{orgId}/agents/{agentId} {
-      allow get, list: if isUserInOrganization(get(/databases/$(database)/documents/organizations/$(orgId)));
-      allow create: if isUserInOrganization(get(/databases/$(database)/documents/organizations/$(orgId)))
+      allow get, list: if isUserInOrganization(orgId);
+      allow create: if isUserInOrganization(orgId)
         && request.resource.data.createdBy == request.auth.uid
         && request.resource.data.createdAt == request.time
         && request.resource.data.updatedBy == request.auth.uid
         && request.resource.data.updatedAt == request.time;
-      allow update: if isUserInOrganization(get(/databases/$(database)/documents/organizations/$(orgId)))
+      allow update: if isUserInOrganization(orgId)
         && request.resource.data.updatedBy == request.auth.uid
         && request.resource.data.updatedAt == request.time;
-      allow delete: if isUserInOrganization(get(/databases/$(database)/documents/organizations/$(orgId)));
+      allow delete: if isUserInOrganization(orgId);
     }
 
     // Audit logs (read-only to clients). Writes come from Cloud Functions service account.
     match /organizations/{orgId}/auditLogs/{logId} {
-      allow read: if isUserInOrganization(get(/databases/$(database)/documents/organizations/$(orgId)));
+      allow read: if isUserInOrganization(orgId);
       allow write: if false;
     }
 
     // Import job progress (read-only for org members). Writes are by Cloud Functions only.
     match /organizations/{orgId}/importJobs/{jobId} {
-      allow read: if isUserInOrganization(get(/databases/$(database)/documents/organizations/$(orgId)));
+      allow read: if isUserInOrganization(orgId);
       allow write: if false;
     }
 
@@ -114,12 +121,7 @@ service cloud.firestore {
       allow create: if isLoggedIn();
       allow delete: if false;
     }
-    match /* {
-      allow read, write: if false;
-      allow list: if false;
-      allow create: if false;
-      allow delete: if false;
-    }
+    // End of rules
   }
 
   

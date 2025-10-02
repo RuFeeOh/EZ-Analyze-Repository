@@ -66,7 +66,7 @@ export class ExceedanceFractionComponent {
   readonly efDetailForItem = (item: any) => item?.ResultsUsed ?? [];
 
   constructor() {
-    const orgId = this.orgService.currentOrg?.Uid;
+    const orgId = this.orgService.orgStore.currentOrg()?.Uid;
     const ref = orgId
       ? collection(this.firestore, `organizations/${orgId}/exposureGroups`)
       : collection(this.firestore, 'organizations/unknown/exposureGroups');
