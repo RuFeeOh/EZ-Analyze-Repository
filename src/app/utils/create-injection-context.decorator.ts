@@ -1,4 +1,5 @@
 import { EnvironmentInjector, runInInjectionContext } from '@angular/core';
+import { tryGetRootEnvironmentInjector } from './root-environment-injector';
 
 /**
  * Method decorator to execute the decorated method inside an Angular injection context.
@@ -26,10 +27,16 @@ export function createInjectionContext(envProperty: string = 'env'): MethodDecor
             return descriptor;
         }
         descriptor.value = function (...args: any[]) {
-            const env: EnvironmentInjector | undefined = (this as any)?.[envProperty];
+            const self: any = this as any;
+            let env: EnvironmentInjector | undefined = self?.[envProperty]
+                ?? self?.env
+                ?? self?.environmentInjector;
+            if (!env) {
+                env = tryGetRootEnvironmentInjector();
+            }
             if (!env) {
                 throw new Error(
-                    `createInjectionContext: Expected property \`${envProperty}\` on instance to be an EnvironmentInjector.`
+                    `createInjectionContext: Expected an EnvironmentInjector (tried instance properties \`${envProperty}\`, \`env\`, \`environmentInjector\`, and the root injector). Add \`private env = inject(EnvironmentInjector)\` or pass the property name: @createInjectionContext('environmentInjector').`
                 );
             }
             return runInInjectionContext(env, () => original.apply(this, args));

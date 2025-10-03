@@ -1,23 +1,27 @@
-import { inject, Injectable } from '@angular/core';
+import { inject, Injectable, EnvironmentInjector } from '@angular/core';
 import { Firestore, collection, collectionData, CollectionReference, doc, setDoc, deleteDoc, getDoc } from '@angular/fire/firestore';
 import { serverTimestamp } from 'firebase/firestore';
 import { Auth } from '@angular/fire/auth';
 import { Agent } from '../../models/agent.model';
 import { Observable } from 'rxjs';
+import { createInjectionContext } from '../../utils/create-injection-context.decorator';
 
 @Injectable({ providedIn: 'root' })
 export class AgentService {
     private firestore = inject(Firestore);
     private auth = inject(Auth);
+    private env = inject(EnvironmentInjector);
 
     private agentsRef(orgId: string): CollectionReference {
         return collection(this.firestore as any, `organizations/${orgId}/agents`) as any;
     }
 
+    @createInjectionContext()
     list(orgId: string): Observable<Agent[]> {
         return collectionData(this.agentsRef(orgId) as any, { idField: 'Uid' }) as any;
     }
 
+    @createInjectionContext()
     async upsert(orgId: string, agent: Agent): Promise<void> {
         const id = this.slug(agent.Name);
         const ref = doc(this.agentsRef(orgId) as any, id);

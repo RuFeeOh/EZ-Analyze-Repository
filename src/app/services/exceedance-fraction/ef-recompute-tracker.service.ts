@@ -15,7 +15,8 @@ export class EfRecomputeTrackerService {
         onProgress?: (done: number, total: number) => void,
         timeoutMs = 99999999
     ): Promise<{ timedOut: boolean }> {
-        const total = ids.length;
+        const uniqueIds = Array.from(new Set(ids || []));
+        const total = uniqueIds.length;
         if (total === 0) return { timedOut: false };
         const startTs = Date.parse(startIso || '');
         let done = 0;
@@ -28,22 +29,47 @@ export class EfRecomputeTrackerService {
             subscriptions.splice(0).forEach(s => { try { s.unsubscribe(); } catch { } });
         };
 
+        const toMillis = (v: any): number => {
+            if (!v) return 0;
+            // Support Firestore Timestamp, Date, or ISO string
+            try {
+                if (typeof v.toMillis === 'function') return v.toMillis();
+                if (v instanceof Date) return v.getTime();
+                if (typeof v === 'string') return Date.parse(v);
+            } catch { }
+            return 0;
+        };
+
         const completion = new Promise<boolean>((resolve) => {
-            ids.forEach(id => {
+            uniqueIds.forEach(id => {
                 const ref = doc(this.firestore as any, `organizations/${orgId}/exposureGroups/${id}`);
                 // Create the AngularFire observable within Angular's injection context
                 const source$ = runInInjectionContext(this.env, () => docData(ref as any));
-                const sub = source$.subscribe((data: any) => {
-                    const latest: any = data?.LatestExceedanceFraction;
-                    const when = latest?.DateCalculated ? Date.parse(latest.DateCalculated) : 0;
-                    if (when && when >= startTs) {
+                const sub = source$.subscribe({
+                    next: (data: any) => {
+                        const latest: any = data?.LatestExceedanceFraction;
+                        const whenLatest = toMillis(latest?.DateCalculated);
+                        const efComputedAt = toMillis(data?.EFComputedAt);
+                        const when = Math.max(whenLatest, efComputedAt);
+                        if (when && when >= startTs) {
+                            done += 1;
+                            progress();
+                            // complete this stream's work
+                            try { sub.unsubscribe(); } catch { }
+                            if (done >= total) {
+                                cleanup();
+                                resolve(false); // not timed out
+                            }
+                        }
+                    },
+                    error: () => {
+                        // If we cannot observe the doc (e.g., permissions), don't hang the UI.
                         done += 1;
                         progress();
-                        // complete this stream's work
                         try { sub.unsubscribe(); } catch { }
                         if (done >= total) {
                             cleanup();
-                            resolve(false); // not timed out
+                            resolve(false);
                         }
                     }
                 });

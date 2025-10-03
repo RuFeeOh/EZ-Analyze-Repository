@@ -3,6 +3,7 @@ import { Component, inject } from '@angular/core';
 import { Auth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, signOut, user } from '@angular/fire/auth';
 import { Router } from '@angular/router';
 import { OrganizationService } from '../../services/organization/organization.service';
+import { createInjectionContext } from '../../utils/create-injection-context.decorator';
 
 
 @Component({
@@ -19,6 +20,7 @@ export class LoginComponent {
     this.user = user(this.auth)
   }
 
+  @createInjectionContext()
   async login() {
     try {
       // First, check if we're coming back from a redirect

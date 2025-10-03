@@ -1,4 +1,4 @@
-import { Injectable, inject } from '@angular/core';
+import { Injectable, inject, EnvironmentInjector } from '@angular/core';
 import { MatDialog } from '@angular/material/dialog';
 import { AgentsDialogComponent } from './agents-dialog/agents-dialog.component';
 import { ExceedanceFractionService } from '../../services/exceedance-fraction/exceedance-fraction.service';
@@ -14,6 +14,7 @@ import { BehaviorSubject, firstValueFrom } from 'rxjs';
 import { BackgroundStatusService } from '../../services/background-status/background-status.service';
 import { AgentService } from '../../services/agent/agent.service';
 import { SampleInfo } from '../../models/sample-info.model';
+import { createInjectionContext } from '../../utils/create-injection-context.decorator';
 
 interface SaveContext { validRows: SampleInfo[]; onProgress?: (done: number, total: number) => void; }
 
@@ -32,12 +33,14 @@ export class DataService {
     private agentService = inject(AgentService);
     private dialog = inject(MatDialog);
     private bg = inject(BackgroundStatusService);
+    private env = inject(EnvironmentInjector);
 
     calculateExceedanceFraction(rows: SampleInfo[]): number {
         const TWAlist: number[] = this.exposureGroupservice.getTWAListFromSampleInfo(rows);
         return this.exceedanceFractionservice.calculateExceedanceProbability(TWAlist, 0.05);
     }
 
+    @createInjectionContext()
     async save(context: SaveContext) {
         const currentOrg = this.organizationservice.orgStore.currentOrg();
         if (!currentOrg) { this.snackBar.open('Please select an organization before uploading.', 'Dismiss', { duration: 5000, verticalPosition: 'top' }); return; }
@@ -68,106 +71,93 @@ export class DataService {
         const startIso = new Date().toISOString();
         const ids = Object.keys(grouped).map(name => this.slugify(name));
         const total = ids.length;
-        const shouldWaitForEf = total > 0 && total <= 10; // wait only for small imports
         const uploadTaskId = this.bg.startTask({ label: 'Uploading results', detail: `${total} exposure group(s)`, kind: 'upload', total, indeterminate: true });
         let progressSnackRef: any = null;
         const progress$ = new BehaviorSubject<{ done: number; total: number }>({ done: 0, total });
-        if (shouldWaitForEf) {
-            try {
-                const { ProgressSnackComponent } = await import('../../shared/progress-snack/progress-snack.component');
-                progressSnackRef = this.snackBar.openFromComponent(ProgressSnackComponent, { data: { label: 'Recomputing EF…', progress$ } });
-            } catch { }
-        }
+
         try {
-            // For large imports, offload to server BulkWriter for speed; for small, stay client-side
-            if (total > 50) {
-                const call = httpsCallable(this.functions as any, 'bulkImportResults');
-                const groupsPayload = Object.entries(grouped).map(([groupName, samples]) => ({ groupName, samples }));
-                // Chunk by rows and groups to avoid 10MB callable payload limits
-                const chunkByRows = (items: any[], maxRowsPerBatch = 3500, maxGroupsPerBatch = 150) => {
-                    const batches: any[][] = [];
-                    let current: any[] = [];
-                    let rows = 0;
-                    for (const g of items) {
-                        const c = (g.samples?.length || 0);
-                        if (current.length && (rows + c > maxRowsPerBatch || current.length >= maxGroupsPerBatch)) {
-                            batches.push(current);
-                            current = [];
-                            rows = 0;
-                        }
-                        current.push(g);
-                        rows += c;
+            const call = httpsCallable(this.functions as any, 'bulkImportResults');
+            const groupsPayload = Object.entries(grouped).map(([groupName, samples]) => ({ groupName, samples }));
+            // Chunk by rows and groups to avoid 10MB callable payload limits
+            const chunkByRows = (items: any[], maxRowsPerBatch = 3500, maxGroupsPerBatch = 150) => {
+                const batches: any[][] = [];
+                let current: any[] = [];
+                let rows = 0;
+                for (const g of items) {
+                    const c = (g.samples?.length || 0);
+                    if (current.length && (rows + c > maxRowsPerBatch || current.length >= maxGroupsPerBatch)) {
+                        batches.push(current);
+                        current = [];
+                        rows = 0;
                     }
-                    if (current.length) batches.push(current);
-                    return batches;
-                };
-                const batches = chunkByRows(groupsPayload);
-                const totalBatches = batches.length;
-                const unsubscribers: Array<() => void> = [];
-                const jobProgress: Record<string, { rows: number; totalRows: number; status?: string }> = {};
-                const updateAggregateProgress = () => {
-                    const rows = Object.values(jobProgress).reduce((s, v) => s + (v.rows || 0), 0);
-                    const totalRows = Object.values(jobProgress).reduce((s, v) => s + (v.totalRows || 0), 0);
-                    const completed = Object.values(jobProgress).filter(v => v.status === 'completed' || v.status === 'completed-with-errors' || v.status === 'failed').length;
-                    this.bg.updateTask(uploadTaskId, { detail: `${rows}/${totalRows} rows • ${completed}/${totalBatches} batches`, indeterminate: totalRows ? false : true });
-                };
-                for (let i = 0; i < batches.length; i++) {
-                    const batch = batches[i];
-                    this.bg.updateTask(uploadTaskId, { detail: `Submitting batch ${i + 1}/${totalBatches}…` });
-                    const resp: any = await call({ orgId: currentOrg.Uid, organizationName: currentOrg.Name, groups: batch });
-                    const jobId = resp?.data?.jobId as string | undefined;
-                    if (jobId) {
-                        const jobDoc = doc(this.firestore as any, `organizations/${currentOrg.Uid}/importJobs/${jobId}`);
-                        const { onSnapshot } = await import('firebase/firestore');
-                        const unsub = onSnapshot(jobDoc as any, (snap: any) => {
-                            const d = (snap?.data?.() || {}) as any;
-                            jobProgress[jobId] = { rows: d.rowsWritten || 0, totalRows: d.totalRows || 0, status: d.status };
-                            updateAggregateProgress();
-                        }, (err: any) => {
-                            // If permission denied for job doc, keep going
-                            updateAggregateProgress();
-                        });
-                        unsubscribers.push(() => { try { unsub(); } catch { } });
-                    }
+                    current.push(g);
+                    rows += c;
                 }
-                // Stop polling after a reasonable window (10 minutes)
-                setTimeout(() => { unsubscribers.forEach(u => u()); }, 10 * 60 * 1000);
-                this.bg.completeTask(uploadTaskId, `Upload queued on server • ${totalBatches} batch(es)`);
-            } else {
-                const groupsList = Object.keys(grouped);
-                await this.exposureGroupservice.saveGroupedSampleInfo(grouped, currentOrg.Uid, currentOrg.Name);
-                this.bg.updateTask(uploadTaskId, { done: groupsList.length, total, detail: `${groupsList.length}/${total} groups uploaded` });
-                this.bg.completeTask(uploadTaskId, 'Upload complete');
+                if (current.length) batches.push(current);
+                return batches;
+            };
+            const batches = chunkByRows(groupsPayload);
+            const totalBatches = batches.length;
+            const unsubscribers: Array<() => void> = [];
+            const jobProgress: Record<string, { rows: number; totalRows: number; status?: string }> = {};
+            const updateAggregateProgress = () => {
+                const rows = Object.values(jobProgress).reduce((s, v) => s + (v.rows || 0), 0);
+                const totalRows = Object.values(jobProgress).reduce((s, v) => s + (v.totalRows || 0), 0);
+                const completed = Object.values(jobProgress).filter(v => v.status === 'completed' || v.status === 'completed-with-errors' || v.status === 'failed').length;
+                this.bg.updateTask(uploadTaskId, { detail: `${rows}/${totalRows} rows • ${completed}/${totalBatches} batches`, indeterminate: totalRows ? false : true });
+            };
+            for (let i = 0; i < batches.length; i++) {
+                const batch = batches[i];
+                this.bg.updateTask(uploadTaskId, { detail: `Submitting batch ${i + 1}/${totalBatches}…` });
+                const resp: any = await call({ orgId: currentOrg.Uid, organizationName: currentOrg.Name, groups: batch });
+                const jobId = resp?.data?.jobId as string | undefined;
+                // if (jobId) {
+                //     const jobDoc = doc(this.firestore as any, `organizations/${currentOrg.Uid}/importJobs/${jobId}`);
+                //     const { onSnapshot } = await import('firebase/firestore');
+                //     const unsub = onSnapshot(jobDoc as any, (snap: any) => {
+                //         const d = (snap?.data?.() || {}) as any;
+                //         jobProgress[jobId] = { rows: d.rowsWritten || 0, totalRows: d.totalRows || 0, status: d.status };
+                //         updateAggregateProgress();
+                //     }, (err: any) => {
+                //         // If permission denied for job doc, keep going
+                //         updateAggregateProgress();
+                //     });
+                //     unsubscribers.push(() => { try { unsub(); } catch { } });
+                // }
             }
+            // Stop polling after a reasonable window (10 minutes)
+            setTimeout(() => { unsubscribers.forEach(u => u()); }, 10 * 60 * 1000);
+            this.bg.completeTask(uploadTaskId, `Upload queued on server • ${totalBatches} batch(es)`);
+
             if (total === 0) { this.snackBar.open('Nothing to recompute.', 'OK', { duration: 2000, verticalPosition: 'top' }); return; }
-            if (shouldWaitForEf) {
-                const efTaskId = this.bg.startTask({ label: 'Computing exceedance fractions', detail: `${total} exposure group(s)`, kind: 'compute', total });
-                const res = await this.efTracker.waitForEf(currentOrg.Uid, ids, startIso, (done, totalCount) => {
-                    try {
-                        progress$.next({ done, total: totalCount });
-                        this.bg.updateTask(efTaskId, { done, total: totalCount, detail: `${done}/${totalCount} updated` });
-                        context.onProgress?.(done, totalCount);
-                    } catch { }
-                }, 60000);
-                try { progressSnackRef?.dismiss(); } catch { }
-                if (res.timedOut) {
-                    this.bg.failTask(efTaskId, 'Timed out');
-                    this.snackBar.open('EF recompute is taking longer than expected.', 'Dismiss', { duration: 5000 });
-                } else {
-                    this.bg.completeTask(efTaskId, 'Recompute complete');
-                    this.snackBar.open('EF recompute complete.', 'OK', { duration: 3000 });
-                }
-            } else {
-                // Large import: let EF compute in background and free the UI immediately
-                const efTaskId = this.bg.startTask({ label: 'Computing exceedance fractions', detail: `${total} exposure group(s)`, kind: 'compute', total });
-                // Don't block UI; just observe progress and complete task when done
-                this.efTracker.waitForEf(currentOrg.Uid, ids, startIso, (done, totalCount) => {
-                    this.bg.updateTask(efTaskId, { done, total: totalCount, detail: `${done}/${totalCount} updated` });
-                }, 600000).then(res => {
-                    if (res.timedOut) this.bg.failTask(efTaskId, 'Timed out'); else this.bg.completeTask(efTaskId, 'Recompute complete');
-                }).catch(() => this.bg.failTask(efTaskId, 'Error'));
-                this.snackBar.open(`Imported ${total} groups. EF vwill compute in the background.`, 'OK', { duration: 4000, verticalPosition: 'top' });
-            }
+            // if (shouldWaitForEf) {
+            //     const efTaskId = this.bg.startTask({ label: 'Computing exceedance fractions', detail: `${total} exposure group(s)`, kind: 'compute', total });
+            //     const res = await this.efTracker.waitForEf(currentOrg.Uid, ids, startIso, (done, totalCount) => {
+            //         try {
+            //             progress$.next({ done, total: totalCount });
+            //             this.bg.updateTask(efTaskId, { done, total: totalCount, detail: `${done}/${totalCount} updated` });
+            //             context.onProgress?.(done, totalCount);
+            //         } catch { }
+            //     }, 60000);
+            //     try { progressSnackRef?.dismiss(); } catch { }
+            //     if (res.timedOut) {
+            //         this.bg.failTask(efTaskId, 'Timed out');
+            //         this.snackBar.open('EF recompute is taking longer than expected.', 'Dismiss', { duration: 5000 });
+            //     } else {
+            //         this.bg.completeTask(efTaskId, 'Recompute complete');
+            //         this.snackBar.open('EF recompute complete.', 'OK', { duration: 3000 });
+            //     }
+            // } else {
+            //     // Large import: let EF compute in background and free the UI immediately
+            //     const efTaskId = this.bg.startTask({ label: 'Computing exceedance fractions', detail: `${total} exposure group(s)`, kind: 'compute', total });
+            //     // Don't block UI; just observe progress and complete task when done
+            //     this.efTracker.waitForEf(currentOrg.Uid, ids, startIso, (done, totalCount) => {
+            //         this.bg.updateTask(efTaskId, { done, total: totalCount, detail: `${done}/${totalCount} updated` });
+            //     }, 600000).then(res => {
+            //         if (res.timedOut) this.bg.failTask(efTaskId, 'Timed out'); else this.bg.completeTask(efTaskId, 'Recompute complete');
+            //     }).catch(() => this.bg.failTask(efTaskId, 'Error'));
+            //     this.snackBar.open(`Imported ${total} groups. EF vwill compute in the background.`, 'OK', { duration: 4000, verticalPosition: 'top' });
+            // }
         } catch (e: any) {
             try { progressSnackRef?.dismiss(); } catch { }
             const code = String(e?.code || '');

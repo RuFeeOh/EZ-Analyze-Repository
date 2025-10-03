@@ -108,8 +108,22 @@ export const recomputeExceedanceFraction = onDocumentWritten("organizations/{org
         return;
     }
 
+    // Helper to normalize timestamp-like values to epoch millis
+    const toMillis = (v: any): number => {
+        try {
+            if (!v) return 0;
+            if (typeof v.toMillis === 'function') return v.toMillis();
+            if (v instanceof Date) return v.getTime();
+            if (typeof v === 'string') {
+                const t = Date.parse(v);
+                return isNaN(t) ? 0 : t;
+            }
+        } catch { /* noop */ }
+        return 0;
+    };
+
     // If bulk import already computed EF in this same write, skip
-    if (after?.EFComputedAt && after?.updatedAt && String(after.EFComputedAt) === String(after.updatedAt)) {
+    if (after?.EFComputedAt && after?.updatedAt && toMillis(after.EFComputedAt) === toMillis(after.updatedAt)) {
         logger.info(`EF trigger: precomputed EF detected, skipping for ${docId}`);
         return;
     }
@@ -131,7 +145,7 @@ export const recomputeExceedanceFraction = onDocumentWritten("organizations/{org
     const db = getFirestore();
     const ref = db.doc(`organizations/${orgId}/exposureGroups/${docId}`);
 
-    // Prefer recompute from subcollection (latest 6 with TWA>0). Fallback to parent Results if subcollection empty.
+    // Prefer recompute from parent Results (already present in bulk import) to avoid subcollection reads.
     const computeFromSubcollection = async (): Promise<{ latest: ExceedanceFraction; mostRecent: SampleInfo[] } | null> => {
         try {
             const resultsRef = db.collection(`organizations/${orgId}/exposureGroups/${docId}/results`);
@@ -157,8 +171,6 @@ export const recomputeExceedanceFraction = onDocumentWritten("organizations/{org
         }
     };
 
-    const subResult = await computeFromSubcollection();
-
     // Compute total count once here (if available) to avoid per-write increments during Importing
     let totalCount: number | undefined = undefined;
     try {
@@ -179,15 +191,24 @@ export const recomputeExceedanceFraction = onDocumentWritten("organizations/{org
         let latest: ExceedanceFraction;
         let mostRecent: SampleInfo[];
 
-        if (subResult) {
-            latest = subResult.latest;
-            mostRecent = subResult.mostRecent;
-        } else {
-            const parentResults: SampleInfo[] = (data.Results || []) as SampleInfo[];
-            mostRecent = getMostRecentSamples(parentResults, 6);
+        // First try computing from parent Results to avoid subcollection reads.
+        const parentResults: SampleInfo[] = (data.Results || []) as SampleInfo[];
+        mostRecent = getMostRecentSamples(parentResults, 6);
+        if (mostRecent.length >= 2) {
             const TWAlist = mostRecent.map(r => Number(r.TWA)).filter(n => n > 0);
             const ef = (TWAlist.length >= 2) ? calculateExceedanceProbability(TWAlist, 0.05) : 0;
             latest = createExceedanceFraction(ef, mostRecent, TWAlist);
+        } else {
+            // Fallback: compute from subcollection if parent Results insufficient
+            const subResult = await computeFromSubcollection();
+            if (subResult) {
+                latest = subResult.latest;
+                mostRecent = subResult.mostRecent;
+            } else {
+                // No data available; set an empty EF snapshot
+                mostRecent = [];
+                latest = createExceedanceFraction(0, mostRecent, []);
+            }
         }
 
         const history: ExceedanceFraction[] = Array.isArray(data.ExceedanceFractionHistory) ? data.ExceedanceFractionHistory : [];

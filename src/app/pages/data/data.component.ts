@@ -218,7 +218,6 @@ export class DataComponent {
       }
       const TWAlist: number[] = this.exposureGroupservice.getTWAListFromSampleInfo(exposureGroup);
       const exceedanceFraction = this.exceedanceFractionservice.calculateExceedanceProbability(TWAlist, 0.05);
-      console.log(exposureGroupName, "||", exceedanceFraction, "||| length: ", exposureGroup.length);
     }
 
 
