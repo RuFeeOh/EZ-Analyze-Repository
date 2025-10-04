@@ -393,21 +393,7 @@ export const bulkImportResults = onCall({ timeoutSeconds: 540, memory: '1GiB' },
         } as IncomingSample;
     };
 
-    // Prepare parent refs and existence (single getAll fetch)
-    const parents = (groups as GroupIn[]).map(g => ({
-        id: slugify(g.groupName),
-        groupName: g.groupName,
-        ref: db.doc(`organizations/${orgId}/exposureGroups/${slugify(g.groupName)}`)
-    }));
-    let existing = new Set<string>();
-    const existingData: Record<string, any> = {};
-    try {
-        const snaps = await db.getAll(...parents.map(p => p.ref));
-        snaps.forEach(s => { if (s.exists) { existing.add(s.id); existingData[s.id] = s.data() || {}; } });
-    } catch (e) {
-        logger.info('bulkImportResults: getAll failed; proceeding without existence optimization', { error: (e as any)?.message || String(e) });
-        existing = new Set();
-    }
+    // No pre-existence fetch; rely on transaction snap.exists later to set createdAt/By
 
     // Initialize job doc (optional)
     if (trackJob) {
@@ -416,7 +402,7 @@ export const bulkImportResults = onCall({ timeoutSeconds: 540, memory: '1GiB' },
             await jobRef.set({
                 status: 'running',
                 phase: 'initializing',
-                totalGroups: parents.length,
+                totalGroups: (groups as GroupIn[]).length,
                 totalRows,
                 groupsProcessed: 0,
                 rowsWritten: 0,
@@ -486,9 +472,9 @@ export const bulkImportResults = onCall({ timeoutSeconds: 540, memory: '1GiB' },
     }
 
     if (trackJob) {
-        try { await jobRef.set({ status: failuresCount > 0 ? 'completed-with-errors' : 'completed', phase: 'done', rowsWritten, failures: failuresCount, groupsProcessed: parents.length, completedAt: Timestamp.now(), updatedAt: Timestamp.now() }, { merge: true }); } catch { }
+        try { await jobRef.set({ status: failuresCount > 0 ? 'completed-with-errors' : 'completed', phase: 'done', rowsWritten, failures: failuresCount, groupsProcessed: (groups as GroupIn[]).length, completedAt: Timestamp.now(), updatedAt: Timestamp.now() }, { merge: true }); } catch { }
     }
-    return { ok: true, groups: parents.length, rowsWritten, failures: failuresCount, jobId: jobId };
+    return { ok: true, groups: (groups as GroupIn[]).length, rowsWritten, failures: failuresCount, jobId: jobId };
 });
 
 // // --- Audit logs (write-once by Functions) ---
