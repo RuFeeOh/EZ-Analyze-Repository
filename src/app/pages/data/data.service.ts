@@ -104,11 +104,11 @@ export class DataService {
                 const rows = Object.values(jobProgress).reduce((s, v) => s + (v.rows || 0), 0);
                 const totalRows = Object.values(jobProgress).reduce((s, v) => s + (v.totalRows || 0), 0);
                 const completed = Object.values(jobProgress).filter(v => v.status === 'completed' || v.status === 'completed-with-errors' || v.status === 'failed').length;
-                this.bg.updateTask(uploadTaskId, { detail: `${rows}/${totalRows} rows • ${completed}/${totalBatches} batches`, indeterminate: totalRows ? false : true });
+                this.bg.updateTask(uploadTaskId, { done: rows, total: totalRows, detail: `${rows}/${totalRows} rows • ${completed}/${totalBatches} batches`, indeterminate: totalRows ? false : true });
             };
             for (let i = 0; i < batches.length; i++) {
                 const batch = batches[i];
-                this.bg.updateTask(uploadTaskId, { detail: `Submitting batch ${i + 1}/${totalBatches}…` });
+                this.bg.updateTask(uploadTaskId, { done: i, total: 1, detail: `Submitting batch ${i + 1}/${totalBatches}…` });
                 // Only enable job tracking for large/chunked uploads to avoid extra writes for small imports
                 const resp: any = await call({ orgId: currentOrg.Uid, organizationName: currentOrg.Name, groups: batch, trackJob: totalBatches > 1 });
                 const jobId = resp?.data?.jobId as string | undefined;
