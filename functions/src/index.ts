@@ -432,7 +432,7 @@ export const recomputeEfBatch = onCall(async (request) => {
 
 // HTTPS callable: bulk import results using Firestore BulkWriter for speed
 export const bulkImportResults = onCall({ timeoutSeconds: 540, memory: '1GiB' }, async (request) => {
-    const { orgId, organizationName, groups } = request.data || {};
+    const { orgId, organizationName, groups, trackJob } = request.data || {};
     const uid = request.auth?.uid || 'system';
     if (!orgId || !Array.isArray(groups) || groups.length === 0) {
         throw new HttpsError('invalid-argument', 'orgId and groups[] required');
@@ -476,21 +476,23 @@ export const bulkImportResults = onCall({ timeoutSeconds: 540, memory: '1GiB' },
         existing = new Set();
     }
 
-    // Initialize job doc
-    try {
-        const totalRows = (groups as GroupIn[]).reduce((sum, g) => sum + (g.samples?.length || 0), 0);
-        await jobRef.set({
-            status: 'running',
-            phase: 'initializing',
-            totalGroups: parents.length,
-            totalRows,
-            groupsProcessed: 0,
-            rowsWritten: 0,
-            startedAt: Timestamp.now(),
-            updatedAt: Timestamp.now(),
-            createdBy: uid,
-        }, { merge: true });
-    } catch (e) { logger.warn('bulkImportResults: failed to init job doc', { error: (e as any)?.message || String(e) }); }
+    // Initialize job doc (optional)
+    if (trackJob) {
+        try {
+            const totalRows = (groups as GroupIn[]).reduce((sum, g) => sum + (g.samples?.length || 0), 0);
+            await jobRef.set({
+                status: 'running',
+                phase: 'initializing',
+                totalGroups: parents.length,
+                totalRows,
+                groupsProcessed: 0,
+                rowsWritten: 0,
+                startedAt: Timestamp.now(),
+                updatedAt: Timestamp.now(),
+                createdBy: uid,
+            }, { merge: true });
+        } catch (e) { logger.warn('bulkImportResults: failed to init job doc', { error: (e as any)?.message || String(e) }); }
+    }
 
     // Use a BulkWriter to write all result documents to subcollections
     const writer = (db as any).bulkWriter ? (db as any).bulkWriter() : null;
@@ -510,25 +512,9 @@ export const bulkImportResults = onCall({ timeoutSeconds: 540, memory: '1GiB' },
     // Queue writes for all groups
     for (const g of groups as GroupIn[]) {
         const groupId = slugify(g.groupName);
-        const parentRef = db.doc(`organizations/${orgId}/exposureGroups/${groupId}`);
         const resultsRef = db.collection(`organizations/${orgId}/exposureGroups/${groupId}/results`);
         const rows = (g.samples || []).map(sanitize);
-
-        // Ensure parent exists with basic metadata; do not include Results array
         const nowTs = Timestamp.now();
-        const parentPayload: any = {
-            OrganizationUid: orgId,
-            OrganizationName: organizationName || null,
-            Group: g.groupName,
-            ExposureGroup: g.groupName,
-            updatedAt: nowTs,
-            updatedBy: uid,
-        };
-        if (!existing.has(groupId)) {
-            parentPayload.createdAt = nowTs;
-            parentPayload.createdBy = uid;
-        }
-        try { await parentRef.set(parentPayload, { merge: true }); } catch { }
 
         for (const r of rows) {
             const docRef = resultsRef.doc();
@@ -584,6 +570,12 @@ export const bulkImportResults = onCall({ timeoutSeconds: 540, memory: '1GiB' },
             } catch { }
             const nowTs = Timestamp.now();
             const parentUpdate: any = {
+                // Basic metadata (so we can avoid the earlier parent write)
+                OrganizationUid: orgId,
+                OrganizationName: organizationName || null,
+                Group: g.groupName,
+                ExposureGroup: g.groupName,
+                // EF + preview computed here
                 LatestExceedanceFraction: latestEf,
                 ExceedanceFractionHistory: FieldValue.arrayUnion(latestEf),
                 ResultsPreview: mostRecent,
@@ -591,6 +583,10 @@ export const bulkImportResults = onCall({ timeoutSeconds: 540, memory: '1GiB' },
                 updatedAt: nowTs,
                 updatedBy: uid,
             };
+            if (!existing.has(groupId)) {
+                parentUpdate.createdAt = nowTs;
+                parentUpdate.createdBy = uid;
+            }
             if (typeof totalCount === 'number') parentUpdate.ResultsTotalCount = totalCount;
             await parentRef.set(parentUpdate, { merge: true });
         } catch (e: any) {
@@ -599,7 +595,9 @@ export const bulkImportResults = onCall({ timeoutSeconds: 540, memory: '1GiB' },
         }
     }
 
-    try { await jobRef.set({ status: failuresCount > 0 ? 'completed-with-errors' : 'completed', phase: 'done', rowsWritten, failures: failuresCount, groupsProcessed: parents.length, completedAt: Timestamp.now(), updatedAt: Timestamp.now() }, { merge: true }); } catch { }
+    if (trackJob) {
+        try { await jobRef.set({ status: failuresCount > 0 ? 'completed-with-errors' : 'completed', phase: 'done', rowsWritten, failures: failuresCount, groupsProcessed: parents.length, completedAt: Timestamp.now(), updatedAt: Timestamp.now() }, { merge: true }); } catch { }
+    }
     return { ok: true, groups: parents.length, rowsWritten, failures: failuresCount, jobId: jobId };
 });
 
