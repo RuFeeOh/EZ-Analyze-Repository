@@ -127,7 +127,7 @@ export class DataService {
             }
             // Stop polling after a reasonable window (10 minutes)
             setTimeout(() => { unsubscribers.forEach(u => u()); }, 10 * 60 * 1000);
-            this.bg.completeTask(uploadTaskId, `Upload queued on server • ${totalBatches} batch(es)`);
+            this.bg.completeTask(uploadTaskId, `Upload successful • ${totalBatches} batch(es)`);
 
             if (total === 0) { this.snackBar.open('Nothing to recompute.', 'OK', { duration: 2000, verticalPosition: 'top' }); return; }
             // if (shouldWaitForEf) {

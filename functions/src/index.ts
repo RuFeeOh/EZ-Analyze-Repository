@@ -373,7 +373,7 @@ export const recomputeEfOnResultsWrite = onDocumentWritten("organizations/{orgId
             tx.set(parentRef, {
                 LatestExceedanceFraction: latest,
                 ExceedanceFractionHistory: updatedHistory,
-                Results: mostRecent, // keep small preview for UI
+                ResultsPreview: mostRecent, // keep small preview for UI without clobbering full Results
                 updatedAt: Timestamp.now(),
             }, { merge: true });
         });
@@ -411,7 +411,7 @@ export const recomputeEfBatch = onCall(async (request) => {
         await parentRef.set({
             LatestExceedanceFraction: latest,
             ExceedanceFractionHistory: FieldValue.arrayUnion(latest as any),
-            Results: mostRecent,
+            ResultsPreview: mostRecent,
             Importing: false,
             updatedAt: Timestamp.now(),
         }, { merge: true });
@@ -463,9 +463,10 @@ export const bulkImportResults = onCall({ timeoutSeconds: 540, memory: '1GiB' },
     // Prepare parent refs and existence (single getAll fetch)
     const parents = (groups as GroupIn[]).map(g => ({ id: slugify(g.groupName), groupName: g.groupName, ref: db.doc(`organizations/${orgId}/exposureGroups/${slugify(g.groupName)}`) }));
     let existing = new Set<string>();
+    const existingData: Record<string, any> = {};
     try {
         const snaps = await db.getAll(...parents.map(p => p.ref));
-        snaps.forEach(s => { if (s.exists) existing.add(s.id); });
+        snaps.forEach(s => { if (s.exists) { existing.add(s.id); existingData[s.id] = s.data() || {}; } });
     } catch (e) {
         logger.info('bulkImportResults: getAll failed; proceeding without existence optimization', { error: (e as any)?.message || String(e) });
         existing = new Set();
@@ -494,8 +495,11 @@ export const bulkImportResults = onCall({ timeoutSeconds: 540, memory: '1GiB' },
         const groupId = slugify(g.groupName);
         const parentRef = db.doc(`organizations/${orgId}/exposureGroups/${groupId}`);
         const rows = (g.samples || []).map(sanitize);
-        // Build EF from the incoming rows (most recent 6 with TWA>0)
-        const asSampleInfo: SampleInfo[] = (rows || []).map(r => ({
+        // Merge with existing Results array if present (concatenate)
+        const prev = (existingData[groupId]?.Results || []) as any[];
+        const mergedRows = [...prev, ...rows];
+        // Build EF from the merged rows (most recent 6 with TWA>0)
+        const asSampleInfo: SampleInfo[] = (mergedRows || []).map(r => ({
             SampleDate: r.SampleDate || '',
             ExposureGroup: r.ExposureGroup || g.groupName,
             Group: g.groupName,
@@ -514,14 +518,14 @@ export const bulkImportResults = onCall({ timeoutSeconds: 540, memory: '1GiB' },
             OrganizationName: organizationName || null,
             Group: g.groupName,
             ExposureGroup: g.groupName,
-            Results: rows,
+            Results: mergedRows,
             Importing: false,
             updatedAt: nowTs,
             updatedBy: uid,
             // Precomputed EF fields
             LatestExceedanceFraction: latestEf,
             ExceedanceFractionHistory: FieldValue.arrayUnion(latestEf),
-            ResultsTotalCount: rows.length,
+            ResultsTotalCount: mergedRows.length,
             EFComputedAt: nowTs,
         };
         if (!existing.has(groupId)) {
