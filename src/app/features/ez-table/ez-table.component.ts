@@ -309,6 +309,11 @@ export class EzTableComponent implements AfterViewInit {
       if (this.detailSource() === 'ef') {
         return item?.LatestExceedanceFraction?.ResultsUsed?.length ?? 0;
       }
+      // Prefer total count if present, else preview length, else legacy Results length
+      const total = item?.ResultsTotalCount;
+      if (typeof total === 'number') return total;
+      const previewLen = item?.ResultsPreview?.length;
+      if (typeof previewLen === 'number') return previewLen;
       return item?.Results?.length ?? 0;
     }
     if (key === 'ResultsTotalCount') {
@@ -386,7 +391,7 @@ export class EzTableComponent implements AfterViewInit {
     if (this.detailSource() === 'ef') {
       return item?.LatestExceedanceFraction?.ResultsUsed ?? [];
     }
-    return item?.Results ?? [];
+    return item?.ResultsPreview ?? item?.Results ?? [];
   }
 
   public defaultSummaryColumns(): (string | EzColumn)[] {

@@ -4,6 +4,7 @@
                 <div class="org-grid">
                         @for (org of organizationList(); track org.Uid) {
                         <div class="org-chip"
+                             [class.active]="currentOrg()?.Uid === org.Uid"
                              role="button"
                              tabindex="0"
                              (click)="setOrganization(org)"
@@ -44,12 +45,21 @@
                                        [(ngModel)]="organizationName"
                                        name="newOrg"
                                        placeholder="Organization"
+                                       [disabled]="saving"
                                        required />
                         </mat-form-field>
                         <button mat-flat-button
                                 color="primary"
                                 type="submit"
-                                [disabled]="!organizationName.trim()">Save</button>
+                                [disabled]="saving || !organizationName.trim()">
+                                <ng-container *ngIf="!saving; else savingTpl">Save</ng-container>
+                        </button>
+                        <ng-template #savingTpl>
+                                <span style="display:inline-flex; align-items:center; gap:6px;">
+                                        <mat-icon inline>hourglass_top</mat-icon>
+                                        Saving…
+                                </span>
+                        </ng-template>
                 </form>
         </div>
 </div>

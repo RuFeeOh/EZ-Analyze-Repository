@@ -24,10 +24,13 @@ export class OrganizationSelectorComponent {
   private organizationService = inject(OrganizationService);
   public organizationName = "";
   public organizationList = this.organizationService.organizationList;
+  public saving = false;
+  public currentOrg = this.organizationService.orgStore.currentOrg;
   async saveOrganization() {
     console.log("saving org", this.organizationName);
 
     try {
+      this.saving = true;
       await this.organizationService.saveOrganization(this.organizationName);
       this.organizationName = "";
       return;
@@ -35,6 +38,7 @@ export class OrganizationSelectorComponent {
       console.log("there was a problem saving orgs", error)
     }
     finally {
+      this.saving = false;
     }
     return null
 
@@ -49,10 +53,11 @@ export class OrganizationSelectorComponent {
     const ok = confirm(`Delete organization "${org.Name}"? This cannot be undone.`);
     if (!ok) return;
     try {
+      this.saving = true;
       await this.organizationService.deleteOrganization(org.Uid);
     } catch (e) {
       console.error('Failed to delete org', e);
-    }
+    } finally { this.saving = false; }
   }
 
 }

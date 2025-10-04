@@ -6,7 +6,7 @@
     "ng": "ng",
     "preemulators": "node scripts/cleanup-ports.mjs",
     "serve": "ng serve",
-    "emulators": "npm --prefix functions run build && node scripts/cleanup-ports.mjs && firebase emulators:start",
+    "emulators": "npm --prefix functions run build && node scripts/cleanup-ports.mjs && firebase emulators:start --inspect-functions",
     "start": "concurrently -k -n EMULATORS,ANGULAR -c yellow,green \"npm:emulators\" \"npm:serve\"",
     "build": "ng build",
     "watch": "ng build --watch --configuration development",

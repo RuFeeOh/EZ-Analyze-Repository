@@ -16,7 +16,21 @@
           "FIREBASE_FUNCTIONS_EMULATOR_DEBUG_PORT": "9229"
         }
       },
-      "problemMatcher": []
+      "problemMatcher": {
+        "owner": "firebase-functions",
+        "pattern": {
+          "regexp": "."
+        },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": {
+            "regexp": ".*"
+          },
+          "endsPattern": {
+            "regexp": "Debugger listening on"
+          }
+        }
+      }
     },
     {
       "label": "Start Functions Shell (Debug)",

@@ -27,6 +27,13 @@
     border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
+.org-chip.active {
+    background: rgba(99, 102, 241, 0.18);
+    /* indigo-500 tint */
+    border-color: rgba(99, 102, 241, 0.45);
+    box-shadow: 0 0 0 1px rgba(99, 102, 241, 0.35) inset;
+}
+
 .org-chip .label {
     padding: 0 2px;
 }
@@ -62,4 +69,11 @@
 
 .name-field {
     min-width: 260px;
+}
+
+/* Subtle disabled look when saving */
+form.create-row[disabled],
+button[disabled] {
+    opacity: 0.7;
+    cursor: not-allowed;
 }

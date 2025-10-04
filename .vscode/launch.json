@@ -1,6 +1,22 @@
 {
   // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
   "version": "0.2.0",
+  "compounds": [
+    {
+      "name": "App + Functions",
+      "configurations": [
+        "ng serve",
+        "Attach to Functions (9229)"
+      ]
+    },
+    {
+      "name": "Debug Functions",
+      "configurations": [
+        "Attach to Functions (9229)"
+      ],
+      "preLaunchTask": "Start Functions Emulator (Debug)"
+    }
+  ],
   "configurations": [
     {
       "name": "ng serve",
@@ -30,13 +46,4 @@
       ]
     }
   ],
-  "compounds": [
-    {
-      "name": "Debug Functions",
-      "configurations": [
-        "Attach to Functions (9229)"
-      ],
-      "preLaunchTask": "Start Functions Emulator (Debug)"
-    }
-  ]
 }

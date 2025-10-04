@@ -320,69 +320,69 @@ export const deleteOrganization = onCall(async (request) => {
 // });
 
 // Recompute EF when results subcollection changes: read latest 6, compute EF, update parent doc
-export const recomputeEfOnResultsWrite = onDocumentWritten("organizations/{orgId}/exposureGroups/{groupId}/results/{resultId}", async (event: any) => {
-    const orgId = event.params.orgId as string;
-    const groupId = event.params.groupId as string;
-    const db = getFirestore();
-    const parentRef = db.doc(`organizations/${orgId}/exposureGroups/${groupId}`);
-    // If parent has Importing: true, skip per-write recompute to avoid thrash
-    try {
-        const parentSnap = await parentRef.get();
-        const parentData = parentSnap.exists ? (parentSnap.data() || {}) : {};
-        if (parentData?.Importing) {
-            return;
-        }
-        // Debounce: if LatestExceedanceFraction was just updated very recently, skip this run
-        const lastEfIso: string | undefined = parentData?.LatestExceedanceFraction?.DateCalculated;
-        if (lastEfIso) {
-            const last = Date.parse(lastEfIso);
-            if (!isNaN(last)) {
-                const elapsed = Date.now() - last;
-                if (elapsed < 3000) { // 3s debounce window
-                    logger.info(`Results recompute skipped due to debounce for org ${orgId} group ${groupId}`);
-                    return;
-                }
-            }
-        }
-    } catch { /* ignore and proceed */ }
-    // Query latest 6 results (TWA > 0) ordered by SampleDate desc
-    try {
-        const resultsRef = db.collection(`organizations/${orgId}/exposureGroups/${groupId}/results`);
-        const q = resultsRef.orderBy('SampleDate', 'desc').limit(12);
-        const snap = await q.get();
-        const all = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
-        // Filter and pick latest 6 with TWA > 0
-        const candidates = all.filter(r => Number(r?.TWA) > 0);
-        const mostRecent = candidates.slice(0, 6).map(r => ({
-            SampleDate: r.SampleDate,
-            ExposureGroup: r.ExposureGroup || r.Group,
-            TWA: Number(r.TWA),
-            Notes: r.Notes,
-            SampleNumber: r.SampleNumber,
-            Agent: r.Agent,
-        })) as SampleInfo[];
-        const TWAlist = mostRecent.map(r => Number(r.TWA)).filter(n => n > 0);
-        const ef = (TWAlist.length >= 2) ? calculateExceedanceProbability(TWAlist, 0.05) : 0;
-        const latest = createExceedanceFraction(ef, mostRecent, TWAlist);
-        // Append to history (bounded growth could be added later)
-        await db.runTransaction(async (tx: any) => {
-            const parentSnap = await tx.get(parentRef);
-            const data = parentSnap.exists ? (parentSnap.data() || {}) : {};
-            const history: ExceedanceFraction[] = Array.isArray(data.ExceedanceFractionHistory) ? data.ExceedanceFractionHistory : [];
-            const updatedHistory = [...history, latest];
-            tx.set(parentRef, {
-                LatestExceedanceFraction: latest,
-                ExceedanceFractionHistory: updatedHistory,
-                ResultsPreview: mostRecent, // keep small preview for UI without clobbering full Results
-                updatedAt: Timestamp.now(),
-            }, { merge: true });
-        });
-        logger.info(`Recomputed EF (results-trigger) for org ${orgId} group ${groupId}`);
-    } catch (err: any) {
-        logger.error('recomputeEfOnResultsWrite error', { orgId, groupId, error: err?.message || String(err) });
-        throw err;
-    }
-});
+// export const recomputeEfOnResultsWrite = onDocumentWritten("organizations/{orgId}/exposureGroups/{groupId}/results/{resultId}", async (event: any) => {
+//     const orgId = event.params.orgId as string;
+//     const groupId = event.params.groupId as string;
+//     const db = getFirestore();
+//     const parentRef = db.doc(`organizations/${orgId}/exposureGroups/${groupId}`);
+//     // If parent has Importing: true, skip per-write recompute to avoid thrash
+//     try {
+//         const parentSnap = await parentRef.get();
+//         const parentData = parentSnap.exists ? (parentSnap.data() || {}) : {};
+//         if (parentData?.Importing) {
+//             return;
+//         }
+//         // Debounce: if LatestExceedanceFraction was just updated very recently, skip this run
+//         const lastEfIso: string | undefined = parentData?.LatestExceedanceFraction?.DateCalculated;
+//         if (lastEfIso) {
+//             const last = Date.parse(lastEfIso);
+//             if (!isNaN(last)) {
+//                 const elapsed = Date.now() - last;
+//                 if (elapsed < 3000) { // 3s debounce window
+//                     logger.info(`Results recompute skipped due to debounce for org ${orgId} group ${groupId}`);
+//                     return;
+//                 }
+//             }
+//         }
+//     } catch { /* ignore and proceed */ }
+//     // Query latest 6 results (TWA > 0) ordered by SampleDate desc
+//     try {
+//         const resultsRef = db.collection(`organizations/${orgId}/exposureGroups/${groupId}/results`);
+//         const q = resultsRef.orderBy('SampleDate', 'desc').limit(12);
+//         const snap = await q.get();
+//         const all = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
+//         // Filter and pick latest 6 with TWA > 0
+//         const candidates = all.filter(r => Number(r?.TWA) > 0);
+//         const mostRecent = candidates.slice(0, 6).map(r => ({
+//             SampleDate: r.SampleDate,
+//             ExposureGroup: r.ExposureGroup || r.Group,
+//             TWA: Number(r.TWA),
+//             Notes: r.Notes,
+//             SampleNumber: r.SampleNumber,
+//             Agent: r.Agent,
+//         })) as SampleInfo[];
+//         const TWAlist = mostRecent.map(r => Number(r.TWA)).filter(n => n > 0);
+//         const ef = (TWAlist.length >= 2) ? calculateExceedanceProbability(TWAlist, 0.05) : 0;
+//         const latest = createExceedanceFraction(ef, mostRecent, TWAlist);
+//         // Append to history (bounded growth could be added later)
+//         await db.runTransaction(async (tx: any) => {
+//             const parentSnap = await tx.get(parentRef);
+//             const data = parentSnap.exists ? (parentSnap.data() || {}) : {};
+//             const history: ExceedanceFraction[] = Array.isArray(data.ExceedanceFractionHistory) ? data.ExceedanceFractionHistory : [];
+//             const updatedHistory = [...history, latest];
+//             tx.set(parentRef, {
+//                 LatestExceedanceFraction: latest,
+//                 ExceedanceFractionHistory: updatedHistory,
+//                 ResultsPreview: mostRecent, // keep small preview for UI without clobbering full Results
+//                 updatedAt: Timestamp.now(),
+//             }, { merge: true });
+//         });
+//         logger.info(`Recomputed EF (results-trigger) for org ${orgId} group ${groupId}`);
+//     } catch (err: any) {
+//         logger.error('recomputeEfOnResultsWrite error', { orgId, groupId, error: err?.message || String(err) });
+//         throw err;
+//     }
+// });
 
 // HTTPS callable to recompute EF for a set of groups
 export const recomputeEfBatch = onCall(async (request) => {
@@ -461,7 +461,11 @@ export const bulkImportResults = onCall({ timeoutSeconds: 540, memory: '1GiB' },
     };
 
     // Prepare parent refs and existence (single getAll fetch)
-    const parents = (groups as GroupIn[]).map(g => ({ id: slugify(g.groupName), groupName: g.groupName, ref: db.doc(`organizations/${orgId}/exposureGroups/${slugify(g.groupName)}`) }));
+    const parents = (groups as GroupIn[]).map(g => ({
+        id: slugify(g.groupName),
+        groupName: g.groupName,
+        ref: db.doc(`organizations/${orgId}/exposureGroups/${slugify(g.groupName)}`)
+    }));
     let existing = new Set<string>();
     const existingData: Record<string, any> = {};
     try {
@@ -488,60 +492,115 @@ export const bulkImportResults = onCall({ timeoutSeconds: 540, memory: '1GiB' },
         }, { merge: true });
     } catch (e) { logger.warn('bulkImportResults: failed to init job doc', { error: (e as any)?.message || String(e) }); }
 
-    // For each group, upsert parent doc with all results as an array
-    let resultsCount = 0;
+    // Use a BulkWriter to write all result documents to subcollections
+    const writer = (db as any).bulkWriter ? (db as any).bulkWriter() : null;
+    let rowsWritten = 0;
     let failuresCount = 0;
+    if (writer) {
+        writer.onWriteError((err: any) => {
+            // retry safe errors
+            if (err.failedAttempts < 5) {
+                return true;
+            }
+            failuresCount += 1;
+            return false;
+        });
+    }
+
+    // Queue writes for all groups
     for (const g of groups as GroupIn[]) {
         const groupId = slugify(g.groupName);
         const parentRef = db.doc(`organizations/${orgId}/exposureGroups/${groupId}`);
+        const resultsRef = db.collection(`organizations/${orgId}/exposureGroups/${groupId}/results`);
         const rows = (g.samples || []).map(sanitize);
-        // Merge with existing Results array if present (concatenate)
-        const prev = (existingData[groupId]?.Results || []) as any[];
-        const mergedRows = [...prev, ...rows];
-        // Build EF from the merged rows (most recent 6 with TWA>0)
-        const asSampleInfo: SampleInfo[] = (mergedRows || []).map(r => ({
-            SampleDate: r.SampleDate || '',
-            ExposureGroup: r.ExposureGroup || g.groupName,
-            Group: g.groupName,
-            TWA: typeof r.TWA === 'number' ? r.TWA : Number(r.TWA || 0),
-            Notes: r.Notes,
-            SampleNumber: (r.SampleNumber === null || r.SampleNumber === undefined) ? undefined : r.SampleNumber,
-        }));
-        const mostRecent = getMostRecentSamples(asSampleInfo, 6);
-        const TWAlist = mostRecent.map(r => Number(r.TWA)).filter(n => n > 0);
-        const efVal = (TWAlist.length >= 2) ? calculateExceedanceProbability(TWAlist, 0.05) : 0;
-        const latestEf = createExceedanceFraction(efVal, mostRecent, TWAlist);
-        const nowTs = Timestamp.now();
 
-        const payload: any = {
+        // Ensure parent exists with basic metadata; do not include Results array
+        const nowTs = Timestamp.now();
+        const parentPayload: any = {
             OrganizationUid: orgId,
             OrganizationName: organizationName || null,
             Group: g.groupName,
             ExposureGroup: g.groupName,
-            Results: mergedRows,
-            Importing: false,
             updatedAt: nowTs,
             updatedBy: uid,
-            // Precomputed EF fields
-            LatestExceedanceFraction: latestEf,
-            ExceedanceFractionHistory: FieldValue.arrayUnion(latestEf),
-            ResultsTotalCount: mergedRows.length,
-            EFComputedAt: nowTs,
         };
         if (!existing.has(groupId)) {
-            payload.createdAt = nowTs;
-            payload.createdBy = uid;
+            parentPayload.createdAt = nowTs;
+            parentPayload.createdBy = uid;
         }
-        try {
-            await parentRef.set(payload, { merge: true });
-            resultsCount += 1;
-        } catch (e: any) {
-            failuresCount += 1;
-            logger.error('bulkImportResults group write failed', { group: g.groupName, error: e?.message || String(e) });
+        try { await parentRef.set(parentPayload, { merge: true }); } catch { }
+
+        for (const r of rows) {
+            const docRef = resultsRef.doc();
+            const payload = {
+                ...r,
+                createdAt: nowTs,
+                createdBy: uid,
+                updatedAt: nowTs,
+                updatedBy: uid,
+            } as any;
+            try {
+                if (writer) { writer.set(docRef, payload, { merge: true }); }
+                else { await docRef.set(payload, { merge: true }); }
+                rowsWritten += 1;
+            } catch (e: any) {
+                failuresCount += 1;
+                logger.error('bulkImportResults row write failed', { group: g.groupName, error: e?.message || String(e) });
+            }
         }
     }
-    try { await jobRef.set({ status: failuresCount > 0 ? 'completed-with-errors' : 'completed', phase: 'done', rowsWritten: resultsCount, failures: failuresCount, groupsProcessed: parents.length, completedAt: Timestamp.now(), updatedAt: Timestamp.now() }, { merge: true }); } catch { }
-    return { ok: true, groups: parents.length, results: resultsCount, failures: failuresCount, jobId: jobId };
+
+    // Finalize bulk writes
+    try { if (writer) await writer.close(); } catch (e: any) { logger.error('bulkImportResults writer close failed', { error: e?.message || String(e) }); }
+
+    // After writes, compute EF and counts per group from subcollection and update parent
+    for (const g of groups as GroupIn[]) {
+        const groupId = slugify(g.groupName);
+        const parentRef = db.doc(`organizations/${orgId}/exposureGroups/${groupId}`);
+        const resultsRef = db.collection(`organizations/${orgId}/exposureGroups/${groupId}/results`);
+        try {
+            const snap = await resultsRef.orderBy('SampleDate', 'desc').limit(50).get();
+            const all = snap.docs.map(d => d.data() as any);
+            const candidates = all.filter(r => Number(r?.TWA) > 0);
+            const mostRecent = candidates.slice(0, 6).map(r => ({
+                SampleDate: r.SampleDate,
+                ExposureGroup: r.ExposureGroup || r.Group || g.groupName,
+                TWA: Number(r.TWA),
+                Notes: r.Notes,
+                SampleNumber: r.SampleNumber,
+                Agent: r.Agent,
+            })) as SampleInfo[];
+            const TWAlist = mostRecent.map(r => Number(r.TWA)).filter(n => n > 0);
+            const efVal = (TWAlist.length >= 2) ? calculateExceedanceProbability(TWAlist, 0.05) : 0;
+            const latestEf = createExceedanceFraction(efVal, mostRecent, TWAlist);
+            // Count total results
+            let totalCount: number | undefined = undefined;
+            try {
+                const countFn = (resultsRef as any).count;
+                if (typeof countFn === 'function') {
+                    const agg = await (resultsRef as any).count().get();
+                    totalCount = agg?.data()?.count ?? undefined;
+                }
+            } catch { }
+            const nowTs = Timestamp.now();
+            const parentUpdate: any = {
+                LatestExceedanceFraction: latestEf,
+                ExceedanceFractionHistory: FieldValue.arrayUnion(latestEf),
+                ResultsPreview: mostRecent,
+                EFComputedAt: nowTs,
+                updatedAt: nowTs,
+                updatedBy: uid,
+            };
+            if (typeof totalCount === 'number') parentUpdate.ResultsTotalCount = totalCount;
+            await parentRef.set(parentUpdate, { merge: true });
+        } catch (e: any) {
+            failuresCount += 1;
+            logger.error('bulkImportResults EF finalize failed', { group: g.groupName, error: e?.message || String(e) });
+        }
+    }
+
+    try { await jobRef.set({ status: failuresCount > 0 ? 'completed-with-errors' : 'completed', phase: 'done', rowsWritten, failures: failuresCount, groupsProcessed: parents.length, completedAt: Timestamp.now(), updatedAt: Timestamp.now() }, { merge: true }); } catch { }
+    return { ok: true, groups: parents.length, rowsWritten, failures: failuresCount, jobId: jobId };
 });
 
 // // --- Audit logs (write-once by Functions) ---
