@@ -278,8 +278,44 @@ export const deleteOrganization = onCall(async (request) => {
     if (!can) throw new HttpsError('permission-denied', 'Not authorized to delete organization');
     const userUids: string[] = (data.UserUids || []).filter((x: any) => typeof x === 'string');
     const writer = (db as any).bulkWriter ? (db as any).bulkWriter() : null;
-    // Delete org and update users
-    await orgRef.delete();
+
+    // Helpers to recursively delete documents and subcollections
+    const deleteDocDeep = async (docRef: FirebaseFirestore.DocumentReference) => {
+        try {
+            const subcols = await (docRef as any).listCollections();
+            for (const col of subcols as FirebaseFirestore.CollectionReference[]) {
+                const subSnap = await col.get();
+                for (const d of subSnap.docs) {
+                    await deleteDocDeep(d.ref);
+                }
+            }
+        } catch (e) {
+            logger.warn('deleteDocDeep: listCollections/get failed', { path: docRef.path, error: (e as any)?.message || String(e) });
+        }
+        if (writer) writer.delete(docRef); else await docRef.delete();
+    };
+    const deleteCollectionDeep = async (collectionPath: string) => {
+        try {
+            const colRef = db.collection(collectionPath);
+            const snap = await colRef.get();
+            if (snap.empty) return;
+            for (const doc of snap.docs) {
+                await deleteDocDeep(doc.ref);
+            }
+        } catch (e) {
+            logger.warn('deleteCollectionDeep: failed', { collectionPath, error: (e as any)?.message || String(e) });
+        }
+    };
+
+    // Delete known org-level collections and their nested subcollections
+    await deleteCollectionDeep(`organizations/${orgId}/exposureGroups`);
+    await deleteCollectionDeep(`organizations/${orgId}/agents`);
+    await deleteCollectionDeep(`organizations/${orgId}/importJobs`);
+
+    // Delete organization document last
+    if (writer) writer.delete(orgRef); else await orgRef.delete();
+
+    // Remove org membership from users
     for (const memberUid of userUids) {
         const userRef = db.doc(`users/${memberUid}`);
         const payload: any = {
@@ -289,6 +325,7 @@ export const deleteOrganization = onCall(async (request) => {
         };
         if (writer) writer.set(userRef, payload, { merge: true }); else await userRef.set(payload, { merge: true });
     }
+
     if (writer) await writer.close();
     return { deleted: true, orgId };
 });
