@@ -406,6 +406,7 @@ export const recomputeEfBatch = onCall(async (request) => {
         throw new Error('orgId and groupIds[] required');
     }
     const db = getFirestore();
+    // Collect EfSummary entries for a single consolidated org update at the end
     const doOne = async (groupId: string) => {
         const parentRef = db.doc(`organizations/${orgId}/exposureGroups/${groupId}`);
         const snap = await parentRef.get();
@@ -413,7 +414,7 @@ export const recomputeEfBatch = onCall(async (request) => {
         const data = snap.data() || {} as any;
         const parentResults: SampleInfo[] = Array.isArray(data.Results) ? data.Results as any : [];
         const mostRecent = getMostRecentSamples(parentResults, 6);
-        const TWAlist = mostRecent.map(r => Number(r.TWA)).filter(n => n > 0);
+        const TWAlist = mostRecent.map(r => Number(r.TWA));
         const ef = (TWAlist.length >= 2) ? calculateExceedanceProbability(TWAlist, 0.05) : 0;
         const latest = createExceedanceFraction(ef, mostRecent, TWAlist);
         await parentRef.set({
@@ -423,18 +424,54 @@ export const recomputeEfBatch = onCall(async (request) => {
             Importing: false,
             updatedAt: Timestamp.now(),
         }, { merge: true });
+        // Build EfSummary entry for this group and return for consolidated write
+        try {
+            const prevEfVal = Array.isArray(data.ExceedanceFractionHistory) && data.ExceedanceFractionHistory.length
+                ? Number((data.ExceedanceFractionHistory[data.ExceedanceFractionHistory.length - 1] as any)?.ExceedanceFraction ?? null)
+                : null;
+            const entry = {
+                GroupId: groupId,
+                ExposureGroup: data.ExposureGroup || data.Group || groupId,
+                ExceedanceFraction: latest.ExceedanceFraction,
+                PreviousExceedanceFraction: prevEfVal,
+                Agent: (mostRecent && mostRecent.length) ? (mostRecent[0] as any)?.Agent ?? null : null,
+                OELNumber: latest.OELNumber,
+                DateCalculated: latest.DateCalculated,
+                SamplesUsedCount: latest.MostRecentNumber,
+            };
+            return entry;
+        } catch (e: any) {
+            logger.warn('recomputeEfBatch: failed to build EfSummary entry', { orgId, groupId, error: e?.message || String(e) });
+            return null;
+        }
     };
     // Limit concurrency to avoid hot shards
     const pool = 10;
     const queue = [...groupIds];
+    const orgSummaryUpdate: Record<string, any> = {};
     const workers: Promise<any>[] = new Array(Math.min(pool, queue.length)).fill(0).map(async () => {
         while (queue.length) {
             const id = queue.shift();
             if (!id) break;
-            try { await doOne(id); } catch (e) { logger.error('recomputeEfBatch item failed', { id, error: (e as any)?.message || String(e) }); }
+            try {
+                const entry = await doOne(id);
+                if (entry) orgSummaryUpdate[`EfSummary.${id}`] = entry;
+            } catch (e) {
+                logger.error('recomputeEfBatch item failed', { id, error: (e as any)?.message || String(e) });
+            }
         }
     });
     await Promise.all(workers);
+    // Single consolidated write to organization doc at the end
+    // Note: set(..., { merge: true }) on EfSummary.{groupId} achieves replace-or-create for each entry
+    try {
+        if (Object.keys(orgSummaryUpdate).length > 0) {
+            const orgRef = db.doc(`organizations/${orgId}`);
+            await orgRef.set(orgSummaryUpdate as any, { merge: true });
+        }
+    } catch (e: any) {
+        logger.warn('recomputeEfBatch: failed to write consolidated EfSummary', { orgId, error: e?.message || String(e) });
+    }
     return { ok: true, count: groupIds.length };
 });
 
@@ -489,36 +526,71 @@ export const bulkImportResults = onCall({ timeoutSeconds: 540, memory: '1GiB' },
     }
 
     // Merge incoming rows into parent Results array (single write per group)
+    // Also accumulate an organization-level EfSummary map to reduce client reads
     let rowsWritten = 0;
     let failuresCount = 0;
+    const orgSummaryUpdate: Record<string, any> = {};
     for (const g of groups as GroupIn[]) {
         const groupId = slugify(g.groupName);
         const parentRef = db.doc(`organizations/${orgId}/exposureGroups/${groupId}`);
         const incoming = (g.samples || []).map(sanitize) as SampleInfo[];
         rowsWritten += incoming.length;
         try {
-            await db.runTransaction(async (tx: any) => {
+            const summaryEntry = await db.runTransaction(async (tx: any) => {
                 const snap = await tx.get(parentRef);
                 const data = snap.exists ? ((snap.data() || {}) as any) : {};
                 const existingResults: SampleInfo[] = Array.isArray(data.Results) ? (data.Results as any[]) : [];
-                const merged = [...existingResults, ...incoming];
-                const sorted = merged
-                    .map((r: any) => ({
-                        Location: r?.Location ?? "",
-                        SampleNumber: (r?.SampleNumber === undefined || r?.SampleNumber === '') ? null : r?.SampleNumber,
-                        SampleDate: r?.SampleDate ?? "",
-                        ExposureGroup: r?.ExposureGroup || r?.Group || g.groupName,
-                        Agent: r?.Agent ?? "",
-                        TWA: (r?.TWA === '' || r?.TWA === undefined || r?.TWA === null) ? null : Number(r?.TWA),
-                        Notes: r?.Notes ?? "",
-                    }))
-                    .sort((a, b) => parseDateToEpoch(b.SampleDate) - parseDateToEpoch(a.SampleDate));
+
+                // Normalize a row to our canonical shape
+                const normalize = (r: any) => ({
+                    Location: r?.Location ?? "",
+                    SampleNumber: (r?.SampleNumber === undefined || r?.SampleNumber === '') ? null : r?.SampleNumber,
+                    SampleDate: r?.SampleDate ?? "",
+                    ExposureGroup: r?.ExposureGroup || r?.Group || g.groupName,
+                    Agent: r?.Agent ?? "",
+                    TWA: (r?.TWA === '' || r?.TWA === undefined || r?.TWA === null) ? null : Number(r?.TWA),
+                    Notes: r?.Notes ?? "",
+                });
+
+                const existingNorm = (existingResults || []).map(normalize);
+                const incomingNorm = (incoming || []).map(normalize);
+
+                // Build map keyed by SampleNumber for replacement, and collect no-key entries separately
+                const bySampleNumber = new Map<string, any>();
+                const noKey: any[] = [];
+
+                for (const r of existingNorm) {
+                    const sn = r.SampleNumber;
+                    if (sn === null || sn === undefined) {
+                        noKey.push(r);
+                    } else {
+                        bySampleNumber.set(String(sn).trim(), r);
+                    }
+                }
+
+                for (const r of incomingNorm) {
+                    const sn = r.SampleNumber;
+                    if (sn === null || sn === undefined) {
+                        // No key available; append as a distinct row
+                        noKey.push(r);
+                    } else {
+                        // Replace or add
+                        bySampleNumber.set(String(sn).trim(), r);
+                    }
+                }
+
+                const mergedUnique = [...bySampleNumber.values(), ...noKey];
+                const sorted = mergedUnique.sort((a, b) => parseDateToEpoch(b.SampleDate) - parseDateToEpoch(a.SampleDate));
                 const limited = sorted.slice(0, 30);
                 // Compute EF from most recent TWA>0 within limited
                 const mostRecent = getMostRecentSamples(limited as any, 6);
                 const TWAlist = mostRecent.map(r => Number(r.TWA)).filter(n => n > 0);
                 const efVal = (TWAlist.length >= 2) ? calculateExceedanceProbability(TWAlist, 0.05) : 0;
                 const latestEf = createExceedanceFraction(efVal, mostRecent as any, TWAlist);
+                // previous value from existing history prior to this append
+                const prevEfVal = Array.isArray(data.ExceedanceFractionHistory) && data.ExceedanceFractionHistory.length
+                    ? Number((data.ExceedanceFractionHistory[data.ExceedanceFractionHistory.length - 1] as any)?.ExceedanceFraction ?? null)
+                    : null;
                 const nowTs = Timestamp.now();
                 const payload: any = {
                     OrganizationUid: orgId,
@@ -539,11 +611,38 @@ export const bulkImportResults = onCall({ timeoutSeconds: 540, memory: '1GiB' },
                     payload.createdBy = uid;
                 }
                 tx.set(parentRef, payload, { merge: true });
+                // Build summary entry for org-level EfSummary map
+                const agentVal = (mostRecent && mostRecent.length) ? (mostRecent[0] as any)?.Agent ?? null : null;
+                const entry = {
+                    GroupId: groupId,
+                    ExposureGroup: g.groupName,
+                    ExceedanceFraction: latestEf.ExceedanceFraction,
+                    PreviousExceedanceFraction: prevEfVal,
+                    Agent: agentVal,
+                    OELNumber: latestEf.OELNumber,
+                    DateCalculated: latestEf.DateCalculated,
+                    SamplesUsedCount: latestEf.MostRecentNumber,
+                };
+                return entry;
             });
+            // Stage for a single org doc update after loop
+            if (summaryEntry) {
+                orgSummaryUpdate[`EfSummary.${groupId}`] = summaryEntry;
+            }
         } catch (e: any) {
             failuresCount += 1;
             logger.error('bulkImportResults merge/write failed', { group: g.groupName, error: e?.message || String(e) });
         }
+    }
+
+    // Apply a consolidated org-level EfSummary update (one write per callable invocation)
+    try {
+        if (Object.keys(orgSummaryUpdate).length > 0) {
+            const orgRef = db.doc(`organizations/${orgId}`);
+            await orgRef.set(orgSummaryUpdate as any, { merge: true });
+        }
+    } catch (e: any) {
+        logger.warn('bulkImportResults: failed to write EfSummary to organization', { orgId, error: e?.message || String(e) });
     }
 
     if (trackJob) {

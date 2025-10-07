@@ -108,7 +108,7 @@ export class DataService {
             };
             for (let i = 0; i < batches.length; i++) {
                 const batch = batches[i];
-                this.bg.updateTask(uploadTaskId, { done: i, total: 1, detail: `Submitting batch ${i + 1}/${totalBatches}…` });
+                this.bg.updateTask(uploadTaskId, { done: i, total: batches.length, detail: `Submitting batch ${i + 1}/${totalBatches}…` });
                 // Only enable job tracking for large/chunked uploads to avoid extra writes for small imports
                 const resp: any = await call({ orgId: currentOrg.Uid, organizationName: currentOrg.Name, groups: batch, trackJob: totalBatches > 1 });
                 const jobId = resp?.data?.jobId as string | undefined;
