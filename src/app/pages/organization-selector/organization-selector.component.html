@@ -5,13 +5,37 @@
                         @for (org of organizationList(); track org.Uid) {
                         <div class="org-chip"
                              [class.active]="currentOrg()?.Uid === org.Uid"
+                             [class.editing]="editingOrgId === org.Uid"
                              role="button"
                              tabindex="0"
-                             (click)="setOrganization(org)"
-                             (keydown.enter)="setOrganization(org)"
-                             (keydown.space)="setOrganization(org)"
-                             matTooltip="Use this organization">
+                             (click)="editingOrgId === org.Uid ? null : setOrganization(org)"
+                             (keydown.enter)="editingOrgId === org.Uid ? null : setOrganization(org)"
+                             (keydown.space)="editingOrgId === org.Uid ? null : setOrganization(org)"
+                             [matTooltip]="editingOrgId === org.Uid ? 'Editing...' : 'Use this organization'">
                                 <organization-circle [org]="org"></organization-circle>
+                                @if (editingOrgId === org.Uid) {
+                                <input class="edit-input"
+                                       [(ngModel)]="editingOrgName"
+                                       [disabled]="saving"
+                                       (click)="$event.stopPropagation()"
+                                       (keydown.enter)="confirmEdit(org)"
+                                       (keydown.escape)="cancelEdit()"
+                                       #editInput />
+                                <button mat-icon-button
+                                        type="button"
+                                        class="icon-btn"
+                                        [disabled]="saving"
+                                        (click)="confirmEdit(org); $event.stopPropagation()">
+                                        <mat-icon>check</mat-icon>
+                                </button>
+                                <button mat-icon-button
+                                        type="button"
+                                        class="icon-btn"
+                                        [disabled]="saving"
+                                        (click)="cancelEdit(); $event.stopPropagation()">
+                                        <mat-icon>close</mat-icon>
+                                </button>
+                                } @else {
                                 <span class="label">{{ org.Name }}</span>
                                 <button mat-icon-button
                                         type="button"
@@ -24,11 +48,17 @@
                                 </button>
                                 <mat-menu #menu="matMenu">
                                         <button mat-menu-item
+                                                (click)="beginEdit(org, $event)">
+                                                <mat-icon>edit</mat-icon>
+                                                <span>Edit</span>
+                                        </button>
+                                        <button mat-menu-item
                                                 (click)="confirmDelete(org)">
                                                 <mat-icon>delete</mat-icon>
                                                 <span>Delete</span>
                                         </button>
                                 </mat-menu>
+                                }
                         </div>
                         }
                 </div>

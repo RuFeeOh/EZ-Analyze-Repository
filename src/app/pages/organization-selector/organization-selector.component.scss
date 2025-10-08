@@ -38,6 +38,27 @@
     padding: 0 2px;
 }
 
+.org-chip.editing {
+    padding-right: 4px;
+}
+
+.org-chip .edit-input {
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 4px;
+    padding: 4px 8px;
+    color: inherit;
+    font-size: inherit;
+    font-family: inherit;
+    outline: none;
+    min-width: 120px;
+}
+
+.org-chip .edit-input:focus {
+    border-color: rgba(99, 102, 241, 0.6);
+    background: rgba(255, 255, 255, 0.12);
+}
+
 .icon-btn {
     border: none;
     background: transparent;

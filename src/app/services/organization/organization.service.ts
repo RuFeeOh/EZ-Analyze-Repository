@@ -109,6 +109,23 @@ export class OrganizationService {
     }
   }
 
+  @createInjectionContext()
+  public async editOrganization(orgId: string, newName: string) {
+    if (!orgId) throw new Error('Organization id is required');
+    if (!newName || !newName.trim()) throw new Error('Organization name is required');
+    const callable = httpsCallable<{ orgId: string; name: string }, { orgId: string; name: string }>(this.fns, 'editOrganization');
+    const result = await callable({ orgId, name: newName.trim() });
+    // Update current org in local storage if it's the one being edited
+    if (this.orgStore.currentOrg()?.Uid === orgId) {
+      const updatedOrg = new Organization({ 
+        ...this.orgStore.currentOrg()!,
+        Name: result.data.name 
+      });
+      this.setCurrentOrg(updatedOrg);
+    }
+    return result.data;
+  }
+
   private createNewOrgToSave(organizationName: string, userId: string) {
     return new Organization({
       Name: organizationName,

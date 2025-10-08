@@ -26,6 +26,8 @@ export class OrganizationSelectorComponent {
   public organizationList = this.organizationService.organizationList;
   public saving = false;
   public currentOrg = this.organizationService.orgStore.currentOrg;
+  public editingOrgId: string | null = null;
+  public editingOrgName = "";
   async saveOrganization() {
     console.log("saving org", this.organizationName);
 
@@ -58,6 +60,34 @@ export class OrganizationSelectorComponent {
     } catch (e) {
       console.error('Failed to delete org', e);
     } finally { this.saving = false; }
+  }
+
+  beginEdit(org: Organization, event?: Event) {
+    if (event) event.stopPropagation();
+    this.editingOrgId = org.Uid;
+    this.editingOrgName = org.Name;
+  }
+
+  cancelEdit() {
+    this.editingOrgId = null;
+    this.editingOrgName = "";
+  }
+
+  async confirmEdit(org: Organization) {
+    if (!this.editingOrgName.trim()) {
+      this.cancelEdit();
+      return;
+    }
+    try {
+      this.saving = true;
+      await this.organizationService.editOrganization(org.Uid, this.editingOrgName.trim());
+      this.editingOrgId = null;
+      this.editingOrgName = "";
+    } catch (e) {
+      console.error('Failed to edit org', e);
+    } finally {
+      this.saving = false;
+    }
   }
 
 }

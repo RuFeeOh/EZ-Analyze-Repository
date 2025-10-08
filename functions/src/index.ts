@@ -262,6 +262,45 @@ export const createOrganization = onCall(async (request) => {
     return { orgId: orgRef.id, name: orgData.Name };
 });
 
+// --- Callable: editOrganization ---
+export const editOrganization = onCall(async (request) => {
+    const uid = request.auth?.uid;
+    const { orgId, name } = request.data || {};
+    if (!uid) throw new HttpsError('unauthenticated', 'Authentication required');
+    if (!orgId || typeof orgId !== 'string') throw new HttpsError('invalid-argument', 'orgId required');
+    if (!name || typeof name !== 'string' || !name.trim()) {
+        throw new HttpsError('invalid-argument', 'Organization name required');
+    }
+    const db = getFirestore();
+    const orgRef = db.doc(`organizations/${orgId}`);
+    const snap = await orgRef.get();
+    if (!snap.exists) throw new HttpsError('not-found', 'Organization not found');
+    const data = snap.data() || {} as any;
+    // Only members with assignPermissions true can edit
+    const can = !!data?.Permissions?.[uid]?.assignPermissions;
+    if (!can) throw new HttpsError('permission-denied', 'Not authorized to edit organization');
+    const userUids: string[] = (data.UserUids || []).filter((x: any) => typeof x === 'string');
+    const newName = name.trim();
+    const now = Timestamp.now();
+    // Update org document and all user documents in a transaction
+    await db.runTransaction(async (tx: any) => {
+        tx.set(orgRef, {
+            Name: newName,
+            updatedAt: now,
+            updatedBy: uid,
+        }, { merge: true });
+        // Update the name in each user's orgMemberships
+        for (const memberUid of userUids) {
+            const userRef = db.doc(`users/${memberUid}`);
+            tx.set(userRef, {
+                [`orgMemberships.${orgId}.name`]: newName,
+                updatedAt: now,
+            }, { merge: true });
+        }
+    });
+    return { orgId, name: newName };
+});
+
 // --- Callable: deleteOrganization ---
 export const deleteOrganization = onCall(async (request) => {
     const uid = request.auth?.uid;
