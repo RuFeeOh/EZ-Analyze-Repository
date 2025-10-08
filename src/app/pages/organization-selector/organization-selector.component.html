@@ -5,30 +5,63 @@
                         @for (org of organizationList(); track org.Uid) {
                         <div class="org-chip"
                              [class.active]="currentOrg()?.Uid === org.Uid"
+                             [class.editing]="editingOrgId === org.Uid"
                              role="button"
                              tabindex="0"
-                             (click)="setOrganization(org)"
-                             (keydown.enter)="setOrganization(org)"
-                             (keydown.space)="setOrganization(org)"
+                             (click)="editingOrgId !== org.Uid && setOrganization(org)"
+                             (keydown.enter)="editingOrgId !== org.Uid && setOrganization(org)"
+                             (keydown.space)="editingOrgId !== org.Uid && setOrganization(org)"
                              matTooltip="Use this organization">
                                 <organization-circle [org]="org"></organization-circle>
-                                <span class="label">{{ org.Name }}</span>
-                                <button mat-icon-button
-                                        type="button"
-                                        class="icon-btn"
-                                        aria-label="More actions"
-                                        [matMenuTriggerFor]="menu"
-                                        (click)="$event.stopPropagation()"
-                                        (keydown)="$event.stopPropagation()">
-                                        <mat-icon>more_vert</mat-icon>
-                                </button>
-                                <mat-menu #menu="matMenu">
-                                        <button mat-menu-item
-                                                (click)="confirmDelete(org)">
-                                                <mat-icon>delete</mat-icon>
-                                                <span>Delete</span>
+                                @if (editingOrgId === org.Uid) {
+                                        <input matInput
+                                               class="edit-input"
+                                               [(ngModel)]="editingOrgName"
+                                               (click)="$event.stopPropagation()"
+                                               (keydown)="$event.stopPropagation()"
+                                               (keydown.enter)="saveRename(org)"
+                                               (keydown.escape)="cancelRename()"
+                                               [disabled]="saving" />
+                                        <button mat-icon-button
+                                                type="button"
+                                                class="icon-btn confirm-btn"
+                                                aria-label="Save rename"
+                                                (click)="saveRename(org); $event.stopPropagation()"
+                                                [disabled]="saving || !editingOrgName.trim()">
+                                                <mat-icon>check</mat-icon>
                                         </button>
-                                </mat-menu>
+                                        <button mat-icon-button
+                                                type="button"
+                                                class="icon-btn cancel-btn"
+                                                aria-label="Cancel rename"
+                                                (click)="cancelRename(); $event.stopPropagation()"
+                                                [disabled]="saving">
+                                                <mat-icon>close</mat-icon>
+                                        </button>
+                                } @else {
+                                        <span class="label">{{ org.Name }}</span>
+                                        <button mat-icon-button
+                                                type="button"
+                                                class="icon-btn"
+                                                aria-label="More actions"
+                                                [matMenuTriggerFor]="menu"
+                                                (click)="$event.stopPropagation()"
+                                                (keydown)="$event.stopPropagation()">
+                                                <mat-icon>more_vert</mat-icon>
+                                        </button>
+                                        <mat-menu #menu="matMenu">
+                                                <button mat-menu-item
+                                                        (click)="startRename(org)">
+                                                        <mat-icon>edit</mat-icon>
+                                                        <span>Rename</span>
+                                                </button>
+                                                <button mat-menu-item
+                                                        (click)="confirmDelete(org)">
+                                                        <mat-icon>delete</mat-icon>
+                                                        <span>Delete</span>
+                                                </button>
+                                        </mat-menu>
+                                }
                         </div>
                         }
                 </div>

@@ -293,6 +293,44 @@ export const deleteOrganization = onCall(async (request) => {
     return { deleted: true, orgId };
 });
 
+// --- Callable: renameOrganization ---
+export const renameOrganization = onCall(async (request) => {
+    const uid = request.auth?.uid;
+    const { orgId, newName } = request.data || {};
+    if (!uid) throw new HttpsError('unauthenticated', 'Authentication required');
+    if (!orgId || typeof orgId !== 'string') throw new HttpsError('invalid-argument', 'orgId required');
+    if (!newName || typeof newName !== 'string' || !newName.trim()) {
+        throw new HttpsError('invalid-argument', 'New organization name required');
+    }
+    const db = getFirestore();
+    const orgRef = db.doc(`organizations/${orgId}`);
+    const snap = await orgRef.get();
+    if (!snap.exists) throw new HttpsError('not-found', 'Organization not found');
+    const data = snap.data() || {} as any;
+    // Only members with assignPermissions true can rename
+    const can = !!data?.Permissions?.[uid]?.assignPermissions;
+    if (!can) throw new HttpsError('permission-denied', 'Not authorized to rename organization');
+    const userUids: string[] = (data.UserUids || []).filter((x: any) => typeof x === 'string');
+    const now = Timestamp.now();
+    const trimmedName = newName.trim();
+    // Update org and all users' membership references in a transaction
+    await db.runTransaction(async (tx: any) => {
+        tx.update(orgRef, {
+            Name: trimmedName,
+            updatedAt: now,
+            updatedBy: uid,
+        });
+        for (const memberUid of userUids) {
+            const userRef = db.doc(`users/${memberUid}`);
+            tx.set(userRef, {
+                [`orgMemberships.${orgId}.name`]: trimmedName,
+                updatedAt: now,
+            }, { merge: true });
+        }
+    });
+    return { orgId, name: trimmedName };
+});
+
 // // Maintain a total count of results on the parent doc using subcollection writes
 // export const maintainResultsTotalCount = onDocumentWritten("organizations/{orgId}/exposureGroups/{groupId}/results/{resultId}", async (event: any) => {
 //     const orgId = event.params.orgId as string;

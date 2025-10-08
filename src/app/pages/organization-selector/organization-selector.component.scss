@@ -38,6 +38,29 @@
     padding: 0 2px;
 }
 
+.org-chip.editing {
+    padding: 6px 6px 6px 6px;
+    background: rgba(99, 102, 241, 0.12);
+    border-color: rgba(99, 102, 241, 0.35);
+}
+
+.org-chip .edit-input {
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 4px;
+    padding: 4px 8px;
+    color: inherit;
+    font-size: inherit;
+    font-family: inherit;
+    min-width: 120px;
+    outline: none;
+}
+
+.org-chip .edit-input:focus {
+    border-color: rgba(99, 102, 241, 0.5);
+    background: rgba(255, 255, 255, 0.08);
+}
+
 .icon-btn {
     border: none;
     background: transparent;
@@ -54,6 +77,16 @@
 
 .icon-btn:hover {
     background: rgba(255, 255, 255, 0.08);
+}
+
+.icon-btn.confirm-btn:hover {
+    background: rgba(34, 197, 94, 0.2);
+    color: rgb(34, 197, 94);
+}
+
+.icon-btn.cancel-btn:hover {
+    background: rgba(239, 68, 68, 0.2);
+    color: rgb(239, 68, 68);
 }
 
 .org-chip:focus {

@@ -11,11 +11,12 @@ import { Organization } from '../../models/organization.model';
 import { Auth } from '@angular/fire/auth';
 import { MatIconModule } from '@angular/material/icon';
 import { MatMenuModule } from '@angular/material/menu';
+import { MatTooltipModule } from '@angular/material/tooltip';
 import { OrganizationCircleComponent } from '../../features/organization-circle/organization-circle.component';
 
 @Component({
   selector: 'app-organization-selector',
-  imports: [MatButtonModule, FormsModule, MatFormFieldModule, MatInputModule, MatIconModule, MatMenuModule, CommonModule, OrganizationCircleComponent],
+  imports: [MatButtonModule, FormsModule, MatFormFieldModule, MatInputModule, MatIconModule, MatMenuModule, MatTooltipModule, CommonModule, OrganizationCircleComponent],
   templateUrl: './organization-selector.component.html',
   styleUrl: './organization-selector.component.scss'
 })
@@ -26,6 +27,9 @@ export class OrganizationSelectorComponent {
   public organizationList = this.organizationService.organizationList;
   public saving = false;
   public currentOrg = this.organizationService.orgStore.currentOrg;
+  public editingOrgId: string | null = null;
+  public editingOrgName = "";
+  
   async saveOrganization() {
     console.log("saving org", this.organizationName);
 
@@ -58,6 +62,34 @@ export class OrganizationSelectorComponent {
     } catch (e) {
       console.error('Failed to delete org', e);
     } finally { this.saving = false; }
+  }
+
+  startRename(org: Organization) {
+    this.editingOrgId = org.Uid;
+    this.editingOrgName = org.Name;
+  }
+
+  cancelRename() {
+    this.editingOrgId = null;
+    this.editingOrgName = "";
+  }
+
+  async saveRename(org: Organization) {
+    if (!this.editingOrgName.trim()) return;
+    if (this.editingOrgName === org.Name) {
+      this.cancelRename();
+      return;
+    }
+    
+    try {
+      this.saving = true;
+      await this.organizationService.renameOrganization(org.Uid, this.editingOrgName);
+      this.cancelRename();
+    } catch (e) {
+      console.error('Failed to rename org', e);
+    } finally {
+      this.saving = false;
+    }
   }
 
 }
