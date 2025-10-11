@@ -7,7 +7,6 @@
  * See a full list of supported triggers at https://firebase.google.com/docs/functions
  */
 
-import { onDocumentWritten } from "firebase-functions/v2/firestore";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import * as logger from "firebase-functions/logger";
 import * as admin from "firebase-admin";
@@ -92,139 +91,136 @@ function createExceedanceFraction(exceedanceFraction: number, resultsUsed: Sampl
 
 
 
-export const recomputeExceedanceFraction = onDocumentWritten("organizations/{orgId}/exposureGroups/{docId}", async (event: any) => {
-    const before = event.data?.before?.data() as any | undefined;
-    const after = event.data?.after?.data() as any | undefined;
-    const docId = event.params.docId as string;
-    const orgId = event.params.orgId as string;
-    if (!after) {
-        logger.info(`EF trigger: document deleted, skipping: organizations/${orgId}/exposureGroups/${docId}`);
-        return;
-    }
+// export const recomputeExceedanceFraction = onDocumentWritten("organizations/{orgId}/exposureGroups/{docId}", async (event: any) => {
+//     const before = event.data?.before?.data() as any | undefined;
+//     const after = event.data?.after?.data() as any | undefined;
+//     const docId = event.params.docId as string;
+//     const orgId = event.params.orgId as string;
+//     if (!after) {
+//         logger.info(`EF trigger: document deleted, skipping: organizations/${orgId}/exposureGroups/${docId}`);
+//         return;
+//     }
 
-    // If still importing, let results-trigger or batch handle it later
-    if (after?.Importing) {
-        logger.info(`EF trigger: Importing flag set, skipping parent-doc recompute for ${docId}`);
-        return;
-    }
+//     // If still importing, let results-trigger or batch handle it later
+//     if (after?.Importing) {
+//         logger.info(`EF trigger: Importing flag set, skipping parent-doc recompute for ${docId}`);
+//         return;
+//     }
 
-    // Helper to normalize timestamp-like values to epoch millis
-    const toMillis = (v: any): number => {
-        try {
-            if (!v) return 0;
-            if (typeof v.toMillis === 'function') return v.toMillis();
-            if (v instanceof Date) return v.getTime();
-            if (typeof v === 'string') {
-                const t = Date.parse(v);
-                return isNaN(t) ? 0 : t;
-            }
-        } catch { /* noop */ }
-        return 0;
-    };
+//     // Helper to normalize timestamp-like values to epoch millis
+//     const toMillis = (v: any): number => {
+//         try {
+//             if (!v) return 0;
+//             if (typeof v.toMillis === 'function') return v.toMillis();
+//             if (v instanceof Date) return v.getTime();
+//             if (typeof v === 'string') {
+//                 const t = Date.parse(v);
+//                 return isNaN(t) ? 0 : t;
+//             }
+//         } catch { /* noop */ }
+//         return 0;
+//     };
 
-    // If bulk import already computed EF in this same write, skip
-    if (after?.EFComputedAt && after?.updatedAt && toMillis(after.EFComputedAt) === toMillis(after.updatedAt)) {
-        logger.info(`EF trigger: precomputed EF detected, skipping for ${docId}`);
-        return;
-    }
+//     // If bulk import already computed EF in this same write, skip
+//     if (after?.EFComputedAt && after?.updatedAt && toMillis(after.EFComputedAt) === toMillis(after.updatedAt)) {
+//         logger.info(`EF trigger: precomputed EF detected, skipping for ${docId}`);
+//         return;
+//     }
 
-    // Determine if we should recompute:
-    // - EF is missing, OR
-    // - Importing transitioned true -> false, OR
-    // - Legacy path: Results array changed
-    const beforeResultsStr = JSON.stringify(before?.Results || []);
-    const afterResultsStr = JSON.stringify(after.Results || []);
-    const efMissing = !after.LatestExceedanceFraction || !Array.isArray(after.ExceedanceFractionHistory);
-    const importingTransition = !!before?.Importing && !after?.Importing;
-    const resultsChanged = beforeResultsStr !== afterResultsStr;
-    if (!efMissing && !importingTransition && !resultsChanged) {
-        logger.info(`EF trigger: no relevant change, skipping for ${docId}`);
-        return;
-    }
+//     // Determine if we should recompute:
+//     // - EF is missing, OR
+//     // - Importing transitioned true -> false, OR
+//     // - Legacy path: Results array changed
+//     const beforeResultsStr = JSON.stringify(before?.Results || []);
+//     const afterResultsStr = JSON.stringify(after.Results || []);
+//     const efMissing = !after.LatestExceedanceFraction || !Array.isArray(after.ExceedanceFractionHistory);
+//     const importingTransition = !!before?.Importing && !after?.Importing;
+//     const resultsChanged = beforeResultsStr !== afterResultsStr;
+//     if (!efMissing && !importingTransition && !resultsChanged) {
+//         logger.info(`EF trigger: no relevant change, skipping for ${docId}`);
+//         return;
+//     }
 
-    const db = getFirestore();
-    const ref = db.doc(`organizations/${orgId}/exposureGroups/${docId}`);
+//     const db = getFirestore();
+//     const ref = db.doc(`organizations/${orgId}/exposureGroups/${docId}`);
 
-    // Prefer recompute from parent Results (already present in bulk import) to avoid subcollection reads.
-    const computeFromSubcollection = async (): Promise<{ latest: ExceedanceFraction; mostRecent: SampleInfo[] } | null> => {
-        try {
-            const resultsRef = db.collection(`organizations/${orgId}/exposureGroups/${docId}/results`);
-            const snap = await resultsRef.orderBy('SampleDate', 'desc').limit(12).get();
-            if (snap.empty) return null;
-            const all = snap.docs.map(d => d.data() as any);
-            const candidates = all.filter(r => Number(r?.TWA) > 0);
-            const mostRecent = candidates.slice(0, 6).map(r => ({
-                SampleDate: r.SampleDate,
-                ExposureGroup: r.ExposureGroup || r.Group,
-                TWA: Number(r.TWA),
-                Notes: r.Notes,
-                SampleNumber: r.SampleNumber,
-                Agent: r.Agent,
-            })) as SampleInfo[];
-            const TWAlist = mostRecent.map(r => Number(r.TWA)).filter(n => n > 0);
-            const ef = (TWAlist.length >= 2) ? calculateExceedanceProbability(TWAlist, 0.05) : 0;
-            const latest = createExceedanceFraction(ef, mostRecent, TWAlist);
-            return { latest, mostRecent };
-        } catch (e) {
-            logger.error('computeFromSubcollection failed', { orgId, docId, error: (e as any)?.message || String(e) });
-            return null;
-        }
-    };
+//     // Prefer recompute from parent Results (already present in bulk import) to avoid subcollection reads.
+//     const computeFromSubcollection = async (): Promise<{ latest: ExceedanceFraction; mostRecent: SampleInfo[] } | null> => {
+//         try {
+//             const resultsRef = db.collection(`organizations/${orgId}/exposureGroups/${docId}/results`);
+//             const snap = await resultsRef.orderBy('SampleDate', 'desc').limit(12).get();
+//             if (snap.empty) return null;
+//             const all = snap.docs.map(d => d.data() as any);
+//             const candidates = all.filter(r => Number(r?.TWA) > 0);
+//             const mostRecent = candidates.slice(0, 6).map(r => ({
+//                 SampleDate: r.SampleDate,
+//                 ExposureGroup: r.ExposureGroup || r.Group,
+//                 TWA: Number(r.TWA),
+//                 Notes: r.Notes,
+//                 SampleNumber: r.SampleNumber,
+//                 Agent: r.Agent,
+//             })) as SampleInfo[];
+//             const TWAlist = mostRecent.map(r => Number(r.TWA)).filter(n => n > 0);
+//             const ef = (TWAlist.length >= 2) ? calculateExceedanceProbability(TWAlist, 0.05) : 0;
+//             const latest = createExceedanceFraction(ef, mostRecent, TWAlist);
+//             return { latest, mostRecent };
+//         } catch (e) {
+//             logger.error('computeFromSubcollection failed', { orgId, docId, error: (e as any)?.message || String(e) });
+//             return null;
+//         }
+//     };
 
-    // Compute total count once here (if available) to avoid per-write increments during Importing
-    let totalCount: number | undefined = undefined;
-    try {
-        const resultsRef = db.collection(`organizations/${orgId}/exposureGroups/${docId}/results`);
-        const countFn = (resultsRef as any).count;
-        if (typeof countFn === 'function') {
-            const aggSnap = await (resultsRef as any).count().get();
-            totalCount = aggSnap?.data()?.count ?? undefined;
-        }
-    } catch (e) {
-        logger.info('Results count not available', { orgId, docId });
-    }
+//     // Compute total count once here (if available) to avoid per-write increments during Importing
+//     let totalCount: number | undefined = undefined;
+//     try {
+//         const resultsRef = db.collection(`organizations/${orgId}/exposureGroups/${docId}/results`);
+//         const countFn = (resultsRef as any).count;
+//         if (typeof countFn === 'function') {
+//             const aggSnap = await (resultsRef as any).count().get();
+//             totalCount = aggSnap?.data()?.count ?? undefined;
+//         }
+//     } catch (e) {
+//         logger.info('Results count not available', { orgId, docId });
+//     }
 
-    await db.runTransaction(async (tx: any) => {
-        const snap = await tx.get(ref);
-        if (!snap.exists) return;
-        const data = snap.data() || {} as any;
-        let latest: ExceedanceFraction;
-        let mostRecent: SampleInfo[];
+//     await db.runTransaction(async (tx: any) => {
+//         const snap = await tx.get(ref);
+//         if (!snap.exists) return;
+//         const data = snap.data() || {} as any;
+//         let latest: ExceedanceFraction;
+//         let mostRecent: SampleInfo[];
 
-        // First try computing from parent Results to avoid subcollection reads.
-        const parentResults: SampleInfo[] = (data.Results || []) as SampleInfo[];
-        mostRecent = getMostRecentSamples(parentResults, 6);
-        if (mostRecent.length >= 2) {
-            const TWAlist = mostRecent.map(r => Number(r.TWA)).filter(n => n > 0);
-            const ef = (TWAlist.length >= 2) ? calculateExceedanceProbability(TWAlist, 0.05) : 0;
-            latest = createExceedanceFraction(ef, mostRecent, TWAlist);
-        } else {
-            // Fallback: compute from subcollection if parent Results insufficient
-            const subResult = await computeFromSubcollection();
-            if (subResult) {
-                latest = subResult.latest;
-                mostRecent = subResult.mostRecent;
-            } else {
-                // No data available; set an empty EF snapshot
-                mostRecent = [];
-                latest = createExceedanceFraction(0, mostRecent, []);
-            }
-        }
+//         // First try computing from parent Results to avoid subcollection reads.
+//         const parentResults: SampleInfo[] = (data.Results || []) as SampleInfo[];
+//         mostRecent = getMostRecentSamples(parentResults, 6);
+//         if (mostRecent.length >= 2) {
+//             const TWAlist = mostRecent.map(r => Number(r.TWA)).filter(n => n > 0);
+//             const ef = (TWAlist.length >= 2) ? calculateExceedanceProbability(TWAlist, 0.05) : 0;
+//             latest = createExceedanceFraction(ef, mostRecent, TWAlist);
+//         } else {
+//             // Fallback: compute from subcollection if parent Results insufficient
+//             const subResult = await computeFromSubcollection();
+//             if (subResult) {
+//                 latest = subResult.latest;
+//                 mostRecent = subResult.mostRecent;
+//             } else {
+//                 // No data available; set an empty EF snapshot
+//                 mostRecent = [];
+//                 latest = createExceedanceFraction(0, mostRecent, []);
+//             }
+//         }
 
-        const history: ExceedanceFraction[] = Array.isArray(data.ExceedanceFractionHistory) ? data.ExceedanceFractionHistory : [];
-        const updatedHistory = [...history, latest];
 
-        const payload: any = {
-            LatestExceedanceFraction: latest,
-            ExceedanceFractionHistory: updatedHistory,
-            ResultsPreview: mostRecent, // keep small preview for UI without overwriting bulk Results array
-        };
-        if (typeof totalCount === 'number') payload.ResultsTotalCount = totalCount;
-        tx.set(ref, payload, { merge: true });
-    });
+//         const payload: any = {
+//             LatestExceedanceFraction: latest,
+//             ResultsPreview: mostRecent, // keep small preview for UI without overwriting bulk Results array
+//         };
+//         if (typeof totalCount === 'number') payload.ResultsTotalCount = totalCount;
+//         tx.set(ref, payload, { merge: true });
+//     });
 
-    logger.info(`Recomputed EF (parent-trigger) for organizations/${orgId}/exposureGroups/${docId}`);
-});
+//     logger.info(`Recomputed EF (parent-trigger) for organizations/${orgId}/exposureGroups/${docId}`);
+// });
 
 // --- Sync org membership into users/{uid} docs ---
 // (Removed membership sync triggers now that create/delete use callables)
@@ -477,13 +473,18 @@ export const recomputeEfBatch = onCall(async (request) => {
 
 // HTTPS callable: bulk import results using Firestore BulkWriter for speed
 export const bulkImportResults = onCall({ timeoutSeconds: 540, memory: '1GiB' }, async (request) => {
-    const { orgId, organizationName, groups, trackJob } = request.data || {};
+    const { orgId, organizationName, groups, trackJob, jobId: providedJobId, importId: providedImportId, finalize, totalGroups: totalGroupsProvided, totalRows: totalRowsProvided } = request.data || {};
     const uid = request.auth?.uid || 'system';
     if (!orgId || !Array.isArray(groups) || groups.length === 0) {
         throw new HttpsError('invalid-argument', 'orgId and groups[] required');
     }
     const db = getFirestore();
-    const jobId = `job_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const chosenId = ((): string => {
+        const incoming = providedJobId || providedImportId; // support either name from client
+        if (incoming && typeof incoming === 'string' && incoming.trim()) return incoming.trim();
+        return `job_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    })();
+    const jobId = chosenId;
     const jobRef = db.doc(`organizations/${orgId}/importJobs/${jobId}`);
 
     type IncomingSample = { Location?: string; SampleNumber?: string | number | null; SampleDate?: string; ExposureGroup?: string; Agent?: string; TWA?: number | string | null; Notes?: string };
@@ -507,36 +508,43 @@ export const bulkImportResults = onCall({ timeoutSeconds: 540, memory: '1GiB' },
 
     // No pre-existence fetch; rely on transaction snap.exists later to set createdAt/By
 
-    // Initialize job doc (optional)
+    // Initialize job doc on first batch; subsequent batches will just increment counters
     if (trackJob) {
         try {
-            const totalRows = (groups as GroupIn[]).reduce((sum, g) => sum + (g.samples?.length || 0), 0);
-            await jobRef.set({
-                status: 'running',
-                phase: 'initializing',
-                totalGroups: (groups as GroupIn[]).length,
-                totalRows,
-                groupsProcessed: 0,
-                rowsWritten: 0,
-                startedAt: Timestamp.now(),
-                updatedAt: Timestamp.now(),
-                createdBy: uid,
-            }, { merge: true });
+            const snap = await jobRef.get();
+            if (!snap.exists) {
+                const totalGroupsAll = typeof totalGroupsProvided === 'number' ? totalGroupsProvided : (groups as GroupIn[]).length;
+                const totalRowsAll = typeof totalRowsProvided === 'number' ? totalRowsProvided : (groups as GroupIn[]).reduce((sum, g) => sum + (g.samples?.length || 0), 0);
+                await jobRef.set({
+                    status: 'running',
+                    phase: 'running',
+                    totalGroups: totalGroupsAll,
+                    totalRows: totalRowsAll,
+                    groupsProcessed: 0,
+                    rowsWritten: 0,
+                    failures: 0,
+                    startedAt: Timestamp.now(),
+                    updatedAt: Timestamp.now(),
+                    createdBy: uid,
+                }, { merge: true });
+            }
         } catch (e) { logger.warn('bulkImportResults: failed to init job doc', { error: (e as any)?.message || String(e) }); }
     }
 
     // Merge incoming rows into parent Results array (single write per group)
     // Also accumulate an organization-level EfSummary map to reduce client reads
+    // and build per-job undo metadata to support reverting this upload
     let rowsWritten = 0;
     let failuresCount = 0;
     const orgSummaryUpdate: Record<string, any> = {};
+    const undoGroups: Record<string, any> = {};
     for (const g of groups as GroupIn[]) {
         const groupId = slugify(g.groupName);
         const parentRef = db.doc(`organizations/${orgId}/exposureGroups/${groupId}`);
         const incoming = (g.samples || []).map(sanitize) as SampleInfo[];
         rowsWritten += incoming.length;
         try {
-            const summaryEntry = await db.runTransaction(async (tx: any) => {
+            const txResult = await db.runTransaction(async (tx: any) => {
                 const snap = await tx.get(parentRef);
                 const data = snap.exists ? ((snap.data() || {}) as any) : {};
                 const existingResults: SampleInfo[] = Array.isArray(data.Results) ? (data.Results as any[]) : [];
@@ -550,14 +558,27 @@ export const bulkImportResults = onCall({ timeoutSeconds: 540, memory: '1GiB' },
                     Agent: r?.Agent ?? "",
                     TWA: (r?.TWA === '' || r?.TWA === undefined || r?.TWA === null) ? null : Number(r?.TWA),
                     Notes: r?.Notes ?? "",
+                    ImportJobId: jobId,
                 });
 
-                const existingNorm = (existingResults || []).map(normalize);
+                const normalizeExisting = (r: any) => ({
+                    Location: r?.Location ?? "",
+                    SampleNumber: (r?.SampleNumber === undefined || r?.SampleNumber === '') ? null : r?.SampleNumber,
+                    SampleDate: r?.SampleDate ?? "",
+                    ExposureGroup: r?.ExposureGroup || r?.Group || g.groupName,
+                    Agent: r?.Agent ?? "",
+                    TWA: (r?.TWA === '' || r?.TWA === undefined || r?.TWA === null) ? null : Number(r?.TWA),
+                    Notes: r?.Notes ?? "",
+                    ImportJobId: r?.ImportJobId ?? null,
+                });
+
+                const existingNorm = (existingResults || []).map(normalizeExisting);
                 const incomingNorm = (incoming || []).map(normalize);
 
                 // Build map keyed by SampleNumber for replacement, and collect no-key entries separately
                 const bySampleNumber = new Map<string, any>();
                 const noKey: any[] = [];
+                const replaced: Record<string, any> = {};
 
                 for (const r of existingNorm) {
                     const sn = r.SampleNumber;
@@ -575,7 +596,13 @@ export const bulkImportResults = onCall({ timeoutSeconds: 540, memory: '1GiB' },
                         noKey.push(r);
                     } else {
                         // Replace or add
-                        bySampleNumber.set(String(sn).trim(), r);
+                        const key = String(sn).trim();
+                        const prev = bySampleNumber.get(key);
+                        if (prev) {
+                            // Track previous row so we can restore on undo
+                            replaced[key] = prev;
+                        }
+                        bySampleNumber.set(key, r);
                     }
                 }
 
@@ -623,11 +650,15 @@ export const bulkImportResults = onCall({ timeoutSeconds: 540, memory: '1GiB' },
                     DateCalculated: latestEf.DateCalculated,
                     SamplesUsedCount: latestEf.MostRecentNumber,
                 };
-                return entry;
+                // Return both entry and undo metadata for this group
+                return { entry, patch: { groupId, replaced, efAdded: latestEf } };
             });
             // Stage for a single org doc update after loop
-            if (summaryEntry) {
-                orgSummaryUpdate[`EfSummary.${groupId}`] = summaryEntry;
+            if (txResult?.entry) {
+                orgSummaryUpdate[`EfSummary.${groupId}`] = txResult.entry;
+            }
+            if (txResult?.patch) {
+                undoGroups[groupId] = txResult.patch;
             }
         } catch (e: any) {
             failuresCount += 1;
@@ -645,12 +676,299 @@ export const bulkImportResults = onCall({ timeoutSeconds: 540, memory: '1GiB' },
         logger.warn('bulkImportResults: failed to write EfSummary to organization', { orgId, error: e?.message || String(e) });
     }
 
+    // Persist undo metadata incrementally per group and update counters
     if (trackJob) {
-        try { await jobRef.set({ status: failuresCount > 0 ? 'completed-with-errors' : 'completed', phase: 'done', rowsWritten, failures: failuresCount, groupsProcessed: (groups as GroupIn[]).length, completedAt: Timestamp.now(), updatedAt: Timestamp.now() }, { merge: true }); } catch { }
+        try {
+            const nowTs = Timestamp.now();
+            const updates: Record<string, any> = {
+                undoAvailable: true,
+                'undo.orgId': orgId,
+                'undo.jobId': jobId,
+                rowsWritten: FieldValue.increment(rowsWritten),
+                failures: FieldValue.increment(failuresCount),
+                groupsProcessed: FieldValue.increment((groups as GroupIn[]).length),
+                updatedAt: nowTs,
+            };
+            for (const [gid, patch] of Object.entries(undoGroups)) {
+                updates[`undo.groups.${gid}`] = patch;
+            }
+            await jobRef.set(updates, { merge: true });
+        } catch (e: any) {
+            logger.warn('bulkImportResults: failed to write undo metadata/counters', { orgId, jobId, error: e?.message || String(e) });
+        }
+        // If this is the last batch, finalize the job status
+        if (finalize) {
+            try {
+                await db.runTransaction(async (tx: any) => {
+                    const snap = await tx.get(jobRef);
+                    const d = (snap.data() || {}) as any;
+                    const failuresAll = Number(d.failures || 0);
+                    const status = failuresAll > 0 ? 'completed-with-errors' : 'completed';
+                    tx.set(jobRef, { status, phase: 'done', completedAt: Timestamp.now(), updatedAt: Timestamp.now() }, { merge: true });
+                });
+            } catch (e: any) {
+                logger.warn('bulkImportResults: finalize failed', { orgId, jobId, error: e?.message || String(e) });
+            }
+        }
     }
-    return { ok: true, groups: (groups as GroupIn[]).length, rowsWritten, failures: failuresCount, jobId: jobId };
+
+    return { ok: true, groups: (groups as GroupIn[]).length, rowsWritten, failures: failuresCount, jobId };
 });
 
+// Callable: undo a previous bulk import by jobId
+export const undoImport = onCall({ timeoutSeconds: 540, memory: '1GiB' }, async (request) => {
+    const { orgId, jobId } = request.data || {};
+    const uid = request.auth?.uid || 'system';
+    const { undo, db, jobRef } = await checkForFailures(orgId, jobId);
+
+    const groupIds = Object.keys(undo.groups || {});
+    // Initialize progress so UI can display live updates
+    try {
+        await jobRef.set({
+            undoStatus: 'running',
+            undoPhase: 'running',
+            undoGroupsTotal: groupIds.length,
+            undoGroupsProcessed: 0,
+            undoRowsRemoved: 0,
+            undoRowsRestored: 0,
+            undoFailures: 0,
+            undoStartedAt: Timestamp.now(),
+            undoUpdatedAt: Timestamp.now(),
+        }, { merge: true });
+    } catch { /* ignore init errors */ }
+    const orgSummaryUpdate: Record<string, any> = {};
+    let failures = 0;
+    // Batch progress updates to reduce write amplification
+    const FLUSH_EVERY = Math.max(10, Math.min(150, Number(process.env.UNDO_PROGRESS_FLUSH_EVERY || 150))); // 10..150, default 150
+    let processedBatch = 0;
+    let removedBatch = 0;
+    let restoredBatch = 0;
+    let failuresBatch = 0;
+    const flushProgress = async (lastGroupId?: string) => {
+        if (processedBatch === 0 && removedBatch === 0 && restoredBatch === 0 && failuresBatch === 0) return;
+        try {
+            await jobRef.set({
+                undoGroupsProcessed: FieldValue.increment(processedBatch),
+                undoRowsRemoved: FieldValue.increment(removedBatch),
+                undoRowsRestored: FieldValue.increment(restoredBatch),
+                undoFailures: FieldValue.increment(failuresBatch),
+                lastGroupId: lastGroupId || null,
+                undoUpdatedAt: Timestamp.now(),
+            }, { merge: true });
+        } catch (e) {
+            logger.warn('undoImport: progress flush failed', { orgId, jobId, processedBatch, error: (e as any)?.message || String(e) });
+        } finally {
+            processedBatch = 0;
+            removedBatch = 0;
+            restoredBatch = 0;
+            failuresBatch = 0;
+        }
+    };
+
+    for (let i = 0; i < groupIds.length; i++) {
+        const groupId = groupIds[i];
+        try {
+            const stats = await checkGroupIfItShouldBeUpdated(db, orgId, groupId, undo, jobId, uid, orgSummaryUpdate);
+            // Accumulate batch counters for this group
+            processedBatch += 1;
+            removedBatch += (stats.removedCount || 0);
+            restoredBatch += (stats.restoredCount || 0);
+            if ((processedBatch % FLUSH_EVERY) === 0) {
+                await flushProgress(groupId);
+            }
+        } catch (e: any) {
+            failures += 1;
+            logger.error('undoImport: failed group', { groupId, error: e?.message || String(e) });
+            failuresBatch += 1;
+            processedBatch += 1; // count failed group as processed for progress
+            if ((processedBatch % FLUSH_EVERY) === 0) {
+                await flushProgress(groupId);
+            }
+        }
+    }
+    // Final flush for any remaining counters
+    await flushProgress(groupIds[groupIds.length - 1]);
+    // Update org summary once
+    try {
+        if (Object.keys(orgSummaryUpdate).length > 0) {
+            const orgRef = db.doc(`organizations/${orgId}`);
+            await orgRef.set(orgSummaryUpdate as any, { merge: true });
+        }
+    } catch (e: any) {
+        logger.warn('undoImport: failed to update org summary', { orgId, error: e?.message || String(e) });
+    }
+    // Mark job as undone
+    try {
+        const status = failures > 0 ? 'completed-with-errors' : 'completed';
+        await jobRef.set({
+            undoneAt: Timestamp.now(),
+            undoneBy: uid,
+            undoStatus: status,
+            undoPhase: 'done',
+            undoCompletedAt: Timestamp.now(),
+            undoUpdatedAt: Timestamp.now(),
+        }, { merge: true });
+    } catch { }
+    return { ok: failures === 0, failures, revertedGroups: groupIds.length };
+});
+
+
+async function checkGroupIfItShouldBeUpdated(db: admin.firestore.Firestore, orgId: any, groupId: string, undo: any, jobId: any, uid: string, orgSummaryUpdate: Record<string, any>): Promise<{ removedCount: number, restoredCount: number, emptied: boolean }> {
+    const parentRef = db.doc(`organizations/${orgId}/exposureGroups/${groupId}`);
+    let result = { removedCount: 0, restoredCount: 0, emptied: false };
+    await db.runTransaction(async (tx: any) => {
+        const snap = await tx.get(parentRef);
+        if (!snap.exists) return;
+        result = undoImportsAndRespectExisting(snap, undo, groupId, jobId, uid, tx, parentRef, orgSummaryUpdate);
+    });
+    return result;
+}
+
+function undoImportsAndRespectExisting(
+    snap: any,
+    undo: any,
+    groupId: string,
+    jobId: any,
+    uid: string,
+    tx: any,
+    parentRef: admin.firestore.DocumentReference<admin.firestore.DocumentData, admin.firestore.DocumentData>,
+    orgSummaryUpdate: Record<string, any>,
+): { removedCount: number, restoredCount: number, emptied: boolean } {
+    const data = (snap.data() || {}) as any;
+    const eGResults: any[] = Array.isArray(data.Results) ? (data.Results as any[]) : [];
+    const replacedMap: Record<string, any> = (undo.groups[groupId]?.replaced || {});
+    // Remove rows from this job and restore replaced ones
+    const keep: any[] = [];
+    const seenKeys = new Set<string>();
+    let removedCount = 0;
+    findExistingResults(eGResults, (result: any) => {
+        return (result?.SampleNumber === undefined || result?.SampleNumber === null || result?.SampleNumber === '') ? null : String(result.SampleNumber).trim();
+    }, jobId, replacedMap, keep, seenKeys, (dropped: boolean) => { if (dropped) removedCount += 1; });
+    // Restore replaced rows
+    let restoredCount = 0;
+    for (const [k, prev] of Object.entries(replacedMap)) {
+        if (!seenKeys.has(k)) { keep.push(prev); restoredCount += 1; }
+    }
+    // Sort and limit
+    const sorted = keep
+        .map((r: any) => ({
+            Location: r?.Location ?? "",
+            SampleNumber: (r?.SampleNumber === undefined || r?.SampleNumber === '') ? null : r?.SampleNumber,
+            SampleDate: r?.SampleDate ?? "",
+            ExposureGroup: r?.ExposureGroup || r?.Group || data?.Group || data?.ExposureGroup || groupId,
+            Agent: r?.Agent ?? "",
+            TWA: (r?.TWA === '' || r?.TWA === undefined || r?.TWA === null) ? null : Number(r?.TWA),
+            Notes: r?.Notes ?? "",
+            ImportJobId: r?.ImportJobId ?? null,
+        }))
+        .sort((a, b) => parseDateToEpoch(b.SampleDate) - parseDateToEpoch(a.SampleDate))
+        .slice(0, 30);
+
+    // If no results remain after undo, delete the group and clear org summary
+    if (sorted.length === 0) {
+        tx.delete(parentRef);
+        orgSummaryUpdate[`EfSummary.${groupId}`] = FieldValue.delete();
+        return { removedCount, restoredCount, emptied: true };
+    }
+
+    const mostRecent = getMostRecentSamples(sorted as any, 6);
+    const TWAlist = mostRecent.map(r => Number(r.TWA)).filter(n => n > 0);
+    const efVal = (TWAlist.length >= 2) ? calculateExceedanceProbability(TWAlist, 0.05) : 0;
+    const latestEf = createExceedanceFraction(efVal, mostRecent as any, TWAlist);
+    const nowTs = Timestamp.now();
+
+    const payload: any = {
+        Results: sorted,
+        ResultsPreview: mostRecent,
+        ResultsTotalCount: sorted.length,
+        LatestExceedanceFraction: latestEf,
+        ExceedanceFractionHistory: FieldValue.arrayUnion(latestEf as any),
+        // Mark EF as precomputed in this write so the parent-doc trigger skips a second recompute
+        EFComputedAt: nowTs,
+        updatedAt: nowTs,
+        updatedBy: uid,
+    };
+    tx.set(parentRef, payload, { merge: true });
+    const agentVal = (mostRecent && mostRecent.length) ? (mostRecent[0] as any)?.Agent ?? null : null;
+    orgSummaryUpdate[`EfSummary.${groupId}`] = {
+        GroupId: groupId,
+        ExposureGroup: data.ExposureGroup || data.Group || groupId,
+        ExceedanceFraction: latestEf.ExceedanceFraction,
+        PreviousExceedanceFraction: null,
+        Agent: agentVal,
+        OELNumber: latestEf.OELNumber,
+        DateCalculated: latestEf.DateCalculated,
+        SamplesUsedCount: latestEf.MostRecentNumber,
+    };
+
+    return { removedCount, restoredCount, emptied: false };
+}
+
+function findExistingResults(
+    eGResults: any[],
+    getSampleNumberAsString: (result: any) => string | null,
+    jobId: any,
+    replacedMap: Record<string, any>,
+    keep: any[],
+    seenKeys: Set<string>,
+    onDrop?: (dropped: boolean) => void,
+) {
+    for (const result of eGResults) {
+        const key = getSampleNumberAsString(result);
+        const isFromJob = result?.ImportJobId === jobId;
+        if (isFromJob) {
+            // drop it
+            if (onDrop) onDrop(true);
+            continue;
+        }
+        if (key && replacedMap[key]) {
+            // Will let restored version replace it after loop
+            continue;
+        }
+        keep.push(result);
+        if (key) seenKeys.add(key);
+        if (onDrop) onDrop(false);
+    }
+}
+
+async function checkForFailures(orgId: any, jobId: any) {
+    if (!orgId || !jobId) throw new HttpsError('invalid-argument', 'orgId and jobId required');
+    const db = getFirestore();
+    const jobRef = db.doc(`organizations/${orgId}/importJobs/${jobId}`);
+    const jobSnap = await jobRef.get();
+    if (!jobSnap.exists) throw new HttpsError('not-found', 'job not found');
+    const job = jobSnap.data() as any;
+    let undo = job?.undo;
+    // If no undo metadata exists (older imports), derive a fallback by scanning exposureGroups for rows with this ImportJobId
+    if (!undo || !undo.groups) {
+        const groupsCol = db.collection(`organizations/${orgId}/exposureGroups`);
+        const snap = await groupsCol.select('Results', 'Group', 'ExposureGroup').get();
+        const groups: Record<string, any> = {};
+        snap.forEach(doc => {
+            const d = (doc.data() || {}) as any;
+            const results: any[] = Array.isArray(d.Results) ? d.Results : [];
+            const hasTagged = results.some(r => r && r.ImportJobId === jobId);
+            if (hasTagged) {
+                groups[doc.id] = { replaced: {} };
+            }
+        });
+
+        if (Object.keys(groups).length === 0) {
+            throw new HttpsError('failed-precondition', 'No undo metadata available');
+        }
+        undo = { orgId, jobId, groups };
+        // Persist fallback undo metadata for subsequent attempts and UI
+        try {
+            const updates: Record<string, any> = { undoAvailable: true, 'undo.orgId': orgId, 'undo.jobId': jobId };
+            for (const gid of Object.keys(groups)) {
+                updates[`undo.groups.${gid}`] = groups[gid];
+            }
+            updates.updatedAt = Timestamp.now();
+            await jobRef.set(updates, { merge: true });
+        } catch { /* ignore errors while persisting fallback */ }
+    }
+    return { undo, db, jobRef };
+}
 // // --- Audit logs (write-once by Functions) ---
 // type AuditLog = {
 //     // ISO timestamp when the edit occurred (server time)

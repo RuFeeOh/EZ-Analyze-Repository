@@ -76,7 +76,7 @@ export class DataService {
         const progress$ = new BehaviorSubject<{ done: number; total: number }>({ done: 0, total });
 
         try {
-            const call = httpsCallable(this.functions as any, 'bulkImportResults');
+            const bulkImport = httpsCallable(this.functions as any, 'bulkImportResults');
             const groupsPayload = Object.entries(grouped).map(([groupName, samples]) => ({ groupName, samples }));
             // Chunk by rows and groups to avoid 10MB callable payload limits
             const chunkByRows = (items: any[], maxRowsPerBatch = 3500, maxGroupsPerBatch = 150) => {
@@ -97,6 +97,11 @@ export class DataService {
                 return batches;
             };
             const batches = chunkByRows(groupsPayload);
+            // Create a single importId to be used across all batches so they collapse to one undo
+            const importId = `import_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+            // Precompute totals across all batches
+            const totalRowsAll = groupsPayload.reduce((sum, g: any) => sum + (g.samples?.length || 0), 0);
+            const totalGroupsAll = groupsPayload.length;
             const totalBatches = batches.length;
             const unsubscribers: Array<() => void> = [];
             const jobProgress: Record<string, { rows: number; totalRows: number; status?: string }> = {};
@@ -106,11 +111,26 @@ export class DataService {
                 const completed = Object.values(jobProgress).filter(v => v.status === 'completed' || v.status === 'completed-with-errors' || v.status === 'failed').length;
                 this.bg.updateTask(uploadTaskId, { done: rows, total: totalRows, detail: `${rows}/${totalRows} rows • ${completed}/${totalBatches} batches`, indeterminate: totalRows ? false : true });
             };
+            const totalRows = batches.reduce((sum, b) => sum + b.length, 0);
             for (let i = 0; i < batches.length; i++) {
                 const batch = batches[i];
-                this.bg.updateTask(uploadTaskId, { done: i, total: batches.length, detail: `Submitting batch ${i + 1}/${totalBatches}…` });
+
+                const batchesDone = batches.reduce((sum, b, idx) => idx < i ? sum + b.length : sum, 0);
+                const curentBatchProgress = batches.reduce((sum, b, idx) => idx <= i ? sum + b.length : sum, 0);
+                this.bg.updateTask(uploadTaskId, { done: batchesDone, total: totalRows, detail: `Submitting batch ${curentBatchProgress}/${totalRows}…` });
+
                 // Only enable job tracking for large/chunked uploads to avoid extra writes for small imports
-                const resp: any = await call({ orgId: currentOrg.Uid, organizationName: currentOrg.Name, groups: batch, trackJob: totalBatches > 1 });
+                const isLast = i === batches.length - 1;
+                const resp: any = await bulkImport({
+                    orgId: currentOrg.Uid,
+                    organizationName: currentOrg.Name,
+                    groups: batch,
+                    trackJob: true,
+                    importId,
+                    totalGroups: totalGroupsAll,
+                    totalRows: totalRowsAll,
+                    finalize: isLast,
+                });
                 const jobId = resp?.data?.jobId as string | undefined;
                 // if (jobId) {
                 //     const jobDoc = doc(this.firestore as any, `organizations/${currentOrg.Uid}/importJobs/${jobId}`);

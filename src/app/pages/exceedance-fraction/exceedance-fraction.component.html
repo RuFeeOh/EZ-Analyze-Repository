@@ -4,12 +4,53 @@
                        (change)="showLatest.set($event.checked)">
           Show Latest
      </mat-slide-toggle>
+     <button mat-button
+             type="button"
+             (click)="showUndo.set(!showUndo())"
+             [disabled]="false">
+          {{ showUndo() ? 'Hide Undo' : 'Undo Import' }}
+     </button>
      <input type="text"
             placeholder="Filter by Exposure Group"
             [value]="filter()"
             (input)="filter.set(($any($event.target).value || ''))"
             style="flex:1; max-width:320px; padding:6px 10px; border:1px solid #ccc; border-radius:4px;" />
 </div>
+
+@if (showUndo()) {
+<div class="undo-panel"
+     style="border:1px solid #ddd; border-radius:6px; padding:8px; margin-bottom:12px;">
+     <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
+          <strong>Undo an Import</strong>
+          <span style="opacity:0.7;">Select a completed import to revert</span>
+     </div>
+     <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+          <select [ngModel]="selectedJobId()"
+                  (ngModelChange)="selectedJobId.set($event)"
+                  style="min-width:260px; padding:6px;">
+               <option [ngValue]="null">Select import…</option>
+               @for (j of (jobs$ | async); track j?.id) {
+               <option [ngValue]="j.id"
+                       [disabled]="!j.undoAvailable || j.undoneAt">
+                    {{ j.completedAt ? (j.completedAt | date:'medium') : (j.startedAt | date:'medium') }}
+                    — rows: {{ j.rowsWritten ?? j.totalRows ?? '?' }}
+                    {{ j.undoAvailable ? (j.undoneAt ? '— undone' : '') : 'locked' }}
+               </option>
+               }
+          </select>
+          <button mat-flat-button
+                  color="warn"
+                  type="button"
+                  (click)="undoSelectedJob()"
+                  [disabled]="!selectedJobId() || undoBusy()">
+               {{ undoBusy() ? 'Reverting…' : 'Undo Selected Import' }}
+          </button>
+     </div>
+     <div style="font-size:12px; opacity:0.7; margin-top:6px;">
+          Undo will remove rows from the selected import and restore any previously replaced rows.
+     </div>
+</div>
+}
 
 <div class="ef-legend"
      style="display:flex; align-items:center; gap:12px; margin: 4px 0 8px 0; font-size: 12px;">

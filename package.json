@@ -13,7 +13,8 @@
     "test": "ng test",
     "test:rules": "firebase emulators:exec --only firestore 'node tests/firestore/run.js'",
     "test:rules:attach": "FIRESTORE_EMULATOR_HOST=localhost:8080 node tests/firestore/run.js",
-    "deploy:functions": "npm --prefix functions run build && firebase deploy --only functions"
+    "firebase:deploy:functions": "npm --prefix functions run build && firebase deploy --only functions",
+    "firebase:run:functions": "npm --prefix functions run build && firebase emulators:exec --only functions 'node ./functions/lib/index.js'"
   },
   "private": true,
   "dependencies": {

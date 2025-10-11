@@ -3,8 +3,9 @@ import { FormsModule } from '@angular/forms';
 import { toObservable } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
 import { Firestore } from '@angular/fire/firestore';
-import { collection, query, where } from 'firebase/firestore';
+import { collection, query, where, orderBy, doc, getDoc } from 'firebase/firestore';
 import { collectionData } from '@angular/fire/firestore';
+import { Functions, httpsCallable } from '@angular/fire/functions';
 import { OrganizationService } from '../../services/organization/organization.service';
 import { MatTableModule } from '@angular/material/table';
 import { MatIconModule } from '@angular/material/icon';
@@ -15,10 +16,11 @@ import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatSlideToggleModule } from '@angular/material/slide-toggle';
 import { EzTableComponent } from '../../features/ez-table/ez-table.component';
 import { SampleInfo } from '../../models/sample-info.model';
-import { Observable, combineLatest } from 'rxjs';
-import { map } from 'rxjs/operators';
+import { Observable, combineLatest, of } from 'rxjs';
+import { map, switchMap } from 'rxjs/operators';
 import { buildHistoryEfItems, buildLatestEfItems } from '../../utils/ef-items.util';
 import { EzColumn } from '../../models/ez-column.model';
+import { BackgroundStatusService } from '../../services/background-status/background-status.service';
 
 @Component({
   selector: 'app-exceedance-fraction',
@@ -28,7 +30,9 @@ import { EzColumn } from '../../models/ez-column.model';
 })
 export class ExceedanceFractionComponent {
   private firestore = inject(Firestore);
+  private fns = inject(Functions);
   private orgService = inject(OrganizationService);
+  private bg = inject(BackgroundStatusService);
   exposureGroups$!: Observable<any[]>;
   resultsData: SampleInfo[] = [];
   // Streams
@@ -38,6 +42,11 @@ export class ExceedanceFractionComponent {
   filteredLatestEfItems$!: Observable<any[]>;
   // Toggle (default ON)
   showLatest = signal(true);
+  // Undo Import UI
+  showUndo = signal(false);
+  selectedJobId = signal<string | null>(null);
+  undoBusy = signal(false);
+  jobs$!: Observable<any[]>;
   // Quick filter by Exposure Group
   filter = signal('');
   // Legend bucket filter: '', 'good' (<5%), 'warn' (5-20%), 'bad' (>=20%), 'custom' (>= customThreshold)
@@ -91,6 +100,82 @@ export class ExceedanceFractionComponent {
         return items.filter(i => i?.EfBucket === b);
       })
     );
+
+    // Recent import jobs (for undo), ordered by completedAt desc, reactive to org changes
+    this.jobs$ = toObservable(this.orgService.currentOrg).pipe(
+      map(org => org?.Uid || null),
+      switchMap(orgUid => {
+        if (!orgUid) return of([]);
+        const jobsRef = collection(this.firestore as any, `organizations/${orgUid}/importJobs`);
+        const qy = query(jobsRef as any, orderBy('completedAt', 'desc'));
+        return collectionData(qy as any, { idField: 'id' });
+      }),
+      map((rows: any[]) => rows.map(j => ({
+        id: j.id,
+        status: j.status ?? null,
+        phase: j.phase ?? null,
+        startedAt: j.startedAt?.toDate ? j.startedAt.toDate() : (j.startedAt ? new Date(j.startedAt) : null),
+        completedAt: j.completedAt?.toDate ? j.completedAt.toDate() : (j.completedAt ? new Date(j.completedAt) : null),
+        undoneAt: j.undoneAt?.toDate ? j.undoneAt.toDate() : (j.undoneAt ? new Date(j.undoneAt) : null),
+        undoAvailable: !!j.undoAvailable,
+        totalRows: j.totalRows ?? null,
+        rowsWritten: j.rowsWritten ?? null,
+        groupsProcessed: j.groupsProcessed ?? null,
+      })))
+    );
+  }
+
+  async undoSelectedJob() {
+    const orgId = this.orgService.orgStore.currentOrg()?.Uid;
+    const jobId = this.selectedJobId();
+    if (!orgId || !jobId) return;
+    try {
+      this.undoBusy.set(true);
+      // Start a background task and subscribe to progress on the job doc
+      const taskId = this.bg.startTask({ label: 'Undo import', detail: 'Preparing…', kind: 'compute', indeterminate: true });
+      const jobDoc = doc(this.firestore as any, `organizations/${orgId}/importJobs/${jobId}`);
+      const { onSnapshot } = await import('firebase/firestore');
+      const unsub = onSnapshot(jobDoc as any, (snap: any) => {
+        const d = (snap?.data?.() || {}) as any;
+        const processed = d.undoGroupsProcessed || 0;
+        const total = d.undoGroupsTotal || 0;
+        const status = d.undoStatus || 'running';
+        const removed = d.undoRowsRemoved || 0;
+        const restored = d.undoRowsRestored || 0;
+        // Update background task progress
+        const detail = total
+          ? `Undoing ${processed}/${total} group(s) • removed ${removed}, restored ${restored}`
+          : `Undoing… removed ${removed}, restored ${restored}`;
+        this.bg.updateTask(taskId, { done: total ? processed : undefined, total: total || undefined, detail });
+        if (status === 'completed' || status === 'completed-with-errors') {
+          try { unsub(); } catch { }
+          const doneMsg = status === 'completed-with-errors' ? 'Undo complete (with some errors).' : 'Undo complete.';
+          this.bg.completeTask(taskId, doneMsg);
+          this.selectedJobId.set(null);
+          this.showUndo.set(false);
+        }
+      }, () => { /* ignore */ });
+
+      const callable = httpsCallable<{ orgId: string; jobId: string }, any>(this.fns, 'undoImport');
+      // Fire-and-follow: kick off the undo and follow progress from the job doc.
+      // The callable may time out on the client before the work finishes; that's okay.
+      callable({ orgId, jobId }).then(() => {
+        // no-op; completion is handled by the snapshot listener which completes the task
+      }).catch((err: any) => {
+        const code = String(err?.code || '');
+        if (code === 'functions/deadline-exceeded') {
+          // Keep following background progress; the function continues server-side.
+          this.bg.updateTask(taskId, { detail: 'Undo is running in the background…', indeterminate: false });
+          return; // do not surface as an error
+        }
+        // Real error: fail the task
+        try { this.bg.failTask(taskId, err?.message || 'Undo failed'); } catch { }
+      });
+    } catch (e) {
+      console.error('Undo failed', e);
+    } finally {
+      this.undoBusy.set(false);
+    }
   }
 
   beginEditCustom(event: Event) {
