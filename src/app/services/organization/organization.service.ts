@@ -109,6 +109,22 @@ export class OrganizationService {
     }
   }
 
+  public async renameOrganization(orgId: string, newName: string) {
+    if (!orgId) throw new Error('Organization id is required');
+    if (!newName || !newName.trim()) throw new Error('Organization name is required');
+    const callable = httpsCallable<{ orgId: string; newName: string }, { orgId: string; name: string }>(this.fns, 'renameOrganization');
+    const result = await callable({ orgId, newName: newName.trim() });
+    // Update current org if it was renamed
+    if (this.orgStore.currentOrg()?.Uid === orgId) {
+      const updatedOrg = new Organization({
+        ...this.orgStore.currentOrg(),
+        Name: result.data.name
+      });
+      this.setCurrentOrg(updatedOrg);
+    }
+    return result.data;
+  }
+
   private createNewOrgToSave(organizationName: string, userId: string) {
     return new Organization({
       Name: organizationName,
