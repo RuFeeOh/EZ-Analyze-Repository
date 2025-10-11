@@ -10,6 +10,12 @@
              [disabled]="false">
           {{ showUndo() ? 'Hide Undo' : 'Undo Import' }}
      </button>
+     <button mat-stroked-button
+             type="button"
+             (click)="exportEfExcel()"
+             [disabled]="false">
+          Export Excel
+     </button>
      <input type="text"
             placeholder="Filter by Exposure Group"
             [value]="filter()"

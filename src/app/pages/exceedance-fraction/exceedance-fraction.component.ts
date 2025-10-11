@@ -16,11 +16,12 @@ import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatSlideToggleModule } from '@angular/material/slide-toggle';
 import { EzTableComponent } from '../../features/ez-table/ez-table.component';
 import { SampleInfo } from '../../models/sample-info.model';
-import { Observable, combineLatest, of } from 'rxjs';
+import { Observable, combineLatest, of, firstValueFrom } from 'rxjs';
 import { map, switchMap } from 'rxjs/operators';
 import { buildHistoryEfItems, buildLatestEfItems } from '../../utils/ef-items.util';
 import { EzColumn } from '../../models/ez-column.model';
 import { BackgroundStatusService } from '../../services/background-status/background-status.service';
+import * as XLSX from 'xlsx';
 
 @Component({
   selector: 'app-exceedance-fraction',
@@ -233,6 +234,137 @@ export class ExceedanceFractionComponent {
   // Close on Escape
   @HostListener('document:keydown.escape') onEscape() {
     if (this.editingCustom()) this.editingCustom.set(false);
+  }
+
+  async exportEf() {
+    try {
+      // Use the filtered stream that matches the current table view
+      const items = await firstValueFrom(this.showLatest() ? this.filteredLatestEfItems$ : this.filteredEfItems$);
+      const rows = (items || []).map((it: any) => {
+        const results = Array.isArray(it?.ResultsUsed) ? it.ResultsUsed : [];
+        // Compute most recent sample date across ResultsUsed
+        const mostRecentDate = results.reduce((max: number, r: any) => {
+          const t = r?.SampleDate ? new Date(r.SampleDate).getTime() : 0;
+          return isNaN(t) ? max : Math.max(max, t);
+        }, 0);
+        const dateStr = mostRecentDate
+          ? new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(mostRecentDate))
+          : '';
+        const efPct = ((typeof it?.ExceedanceFraction === 'number' ? it.ExceedanceFraction : 0) * 100).toFixed(2);
+        return {
+          ExposureGroup: String(it?.ExposureGroup ?? ''),
+          ExceedanceFractionPct: efPct,
+          MostRecentSampleDate: dateStr,
+        };
+      });
+      const header = ['Exposure Group', 'Exceedance Fraction (%)', 'Most Recent Sample Date'];
+      const csv = [header.join(','), ...rows.map(r => [
+        // Basic CSV escaping for commas/quotes
+        csvEscape(r.ExposureGroup),
+        String(r.ExceedanceFractionPct),
+        csvEscape(r.MostRecentSampleDate),
+      ].join(','))].join('\n');
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const nowCsv = new Date();
+      const tsCsv = `${String(nowCsv.getMonth() + 1).padStart(2, '0')}-${String(nowCsv.getDate()).padStart(2, '0')}-${nowCsv.getFullYear()}`;
+      a.href = url;
+      a.download = `exceedance-fraction-${this.showLatest() ? 'latest' : 'history'}-${tsCsv}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error('Export failed', e);
+    }
+
+    function csvEscape(v: any): string {
+      const s = String(v ?? '');
+      if (s.includes('"') || s.includes(',') || s.includes('\n')) {
+        return '"' + s.replace(/"/g, '""') + '"';
+      }
+      return s;
+    }
+  }
+
+  async exportEfExcel() {
+    try {
+      const items = await firstValueFrom(this.showLatest() ? this.filteredLatestEfItems$ : this.filteredEfItems$);
+      const rows = (items || []).map((it: any) => {
+        const results = Array.isArray(it?.ResultsUsed) ? it.ResultsUsed : [];
+        const mostRecentDateMs = results.reduce((max: number, r: any) => {
+          const t = r?.SampleDate ? new Date(r.SampleDate).getTime() : NaN;
+          return isNaN(t) ? max : Math.max(max, t);
+        }, 0);
+        // Normalize to noon to avoid TZ midnight shifts appearing as prior/next day in spreadsheet apps
+        const mostRecentDate = mostRecentDateMs ? (() => { const d = new Date(mostRecentDateMs); d.setHours(12, 0, 0, 0); return d; })() : undefined;
+        const efFraction = typeof it?.ExceedanceFraction === 'number' ? it.ExceedanceFraction : 0; // 0..1
+        const efPercent = Math.round(efFraction * 10000) / 100; // percent value with 2 decimals precision
+        return {
+          ExposureGroup: String(it?.ExposureGroup ?? ''),
+          ExceedanceFraction: efPercent, // numeric percent (no % sign; formatted to 2 decimals)
+          MostRecentSampleDate: mostRecentDate // Date object for typed date cell (undefined if missing)
+        };
+      })
+        // Default sort by Exposure Group (ascending)
+        .sort((a: any, b: any) => String(a.ExposureGroup).localeCompare(String(b.ExposureGroup), undefined, { sensitivity: 'base' }));
+
+      // Build an array-of-arrays for the sheet
+      const header = ['Exposure Group', 'Exceedance Fraction', 'Most Recent Sample Date'];
+      const data: any[][] = [
+        header,
+        ...rows.map(r => [r.ExposureGroup, r.ExceedanceFraction, r.MostRecentSampleDate])
+      ];
+      const ws = XLSX.utils.aoa_to_sheet(data, { cellDates: true });
+
+      // Column widths
+      (ws as any)['!cols'] = [{ wch: 36 }, { wch: 24 }, { wch: 24 }];
+
+      // Apply number formats and attempt to center date cells
+      const range = XLSX.utils.decode_range(ws['!ref'] as string);
+      for (let R = range.s.r + 1; R <= range.e.r; R++) { // skip header row
+        // Exceedance Fraction (numeric, 2 decimals) in column 1 (0-based index)
+        const efAddr = XLSX.utils.encode_cell({ r: R, c: 1 });
+        const efCell = ws[efAddr];
+        if (efCell) {
+          efCell.t = 'n';
+          // Show exactly two decimal places (no percent sign)
+          (efCell as any).z = '0.00';
+        }
+
+        // Most Recent Sample Date in column 2
+        const dateAddr = XLSX.utils.encode_cell({ r: R, c: 2 });
+        const dCell = ws[dateAddr];
+        const v = dCell?.v;
+        if (v instanceof Date) {
+          // Mark as date and apply a friendly format
+          dCell.t = 'd';
+          (dCell as any).z = 'mmm d, yyyy';
+          // Best-effort: try to center the date column. Note: styles are not written in the community edition of SheetJS.
+          (dCell as any).s = { alignment: { horizontal: 'center' } };
+        } else if (typeof v === 'number') {
+          // If a numeric Excel date leaks through, still set a format
+          dCell.t = 'n';
+          (dCell as any).z = 'mmm d, yyyy';
+          (dCell as any).s = { alignment: { horizontal: 'center' } };
+        }
+      }
+
+      // Enable auto-filter so spreadsheet apps recognize the header row
+      const lastRow = Math.max(range.e.r + 1, 1);
+      (ws as any)['!autofilter'] = { ref: `A1:C${lastRow}` };
+      // Freeze header row (supported in many apps, including Excel; Numbers may ignore)
+      (ws as any)['!freeze'] = { xSplit: 0, ySplit: 1 };
+
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, this.showLatest() ? 'EF Latest' : 'EF History');
+      const nowXlsx = new Date();
+      const tsXlsx = `${String(nowXlsx.getMonth() + 1).padStart(2, '0')}-${String(nowXlsx.getDate()).padStart(2, '0')}-${nowXlsx.getFullYear()}`;
+      XLSX.writeFile(wb, `updated-ef_${this.showLatest() ? 'latest' : 'history'}_${tsXlsx}.xlsx`);
+    } catch (e) {
+      console.error('Excel export failed', e);
+    }
   }
 
 }
