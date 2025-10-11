@@ -56,6 +56,8 @@ export class ExceedanceFractionComponent {
   customThreshold = signal(0.25);
   editingCustom = signal(false);
   @ViewChild('customThresholdWrapper') customWrapperRef?: ElementRef<HTMLElement>;
+  // Observable that computes the most recent sample date across all items
+  mostRecentSampleDate$!: Observable<Date | null>;
   private bucketFor(val: number | null | undefined): 'good' | 'warn' | 'bad' {
     const v = typeof val === 'number' ? val : 0;
     if (v < 0.05) return 'good';
@@ -99,6 +101,27 @@ export class ExceedanceFractionComponent {
         if (!b) return items;
         if (b === 'custom') return items.filter(i => (i?.ExceedanceFraction ?? 0) >= custom);
         return items.filter(i => i?.EfBucket === b);
+      })
+    );
+
+    // Compute most recent sample date across all items (reactive to showLatest toggle)
+    this.mostRecentSampleDate$ = combineLatest([
+      toObservable(this.showLatest),
+      this.filteredLatestEfItems$,
+      this.filteredEfItems$
+    ]).pipe(
+      map(([latest, latestItems, historyItems]) => {
+        const items = latest ? latestItems : historyItems;
+        if (!items || items.length === 0) return null;
+        let maxDate = 0;
+        for (const item of items) {
+          const results = item?.ResultsUsed || [];
+          for (const r of results) {
+            const t = r?.SampleDate ? new Date(r.SampleDate).getTime() : 0;
+            if (!isNaN(t) && t > maxDate) maxDate = t;
+          }
+        }
+        return maxDate > 0 ? new Date(maxDate) : null;
       })
     );
 
