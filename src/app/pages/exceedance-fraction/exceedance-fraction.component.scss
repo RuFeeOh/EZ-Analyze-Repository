@@ -298,3 +298,26 @@
         opacity: 1;
     }
 }
+
+/* Most Recent Sample widget */
+.most-recent-sample {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.9rem;
+    padding: 4px 12px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 4px;
+}
+
+.most-recent-sample .label {
+    font-weight: 500;
+    opacity: 0.75;
+}
+
+.most-recent-sample .value {
+    font-weight: 600;
+    color: #6366f1;
+    /* indigo accent to match the theme */
+}
