@@ -221,6 +221,7 @@
                               </span>
                     </ng-container>
                     <ng-container *ngSwitchCase="'DateCalculated'">{{ value | date:'mediumDate' }}</ng-container>
+                    <ng-container *ngSwitchCase="'MostRecentSampleDate'">{{ value | date:'mediumDate' }}</ng-container>
                     <ng-container *ngSwitchCase="'SampleDate'">{{ value | date:'mediumDate' }}</ng-container>
                     <ng-container *ngSwitchCase="'TWA'">{{ value | number:'1.3-3' }}</ng-container>
                     <ng-container *ngSwitchDefault>{{ value }}</ng-container>

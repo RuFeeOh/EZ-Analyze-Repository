@@ -33,6 +33,7 @@ export interface ExceedanceFractionItem {
     PrevDateCalculated: string;
     Trend: 'up' | 'down' | 'flat';
     Delta: number; // current - previous (0 if first / unknown)
+    MostRecentSampleDate: string; // ISO date string of the most recent sample in ResultsUsed
 }
 
 function bucketFor(val: number | null | undefined): EfBucket {
@@ -77,6 +78,15 @@ function firstAgent(results: any[]): string {
     return found?.Agent ?? '';
 }
 
+function mostRecentSampleDate(results: any[]): string {
+    if (!Array.isArray(results) || results.length === 0) return '';
+    const mostRecentMs = results.reduce((max: number, r: any) => {
+        const t = r?.SampleDate ? new Date(r.SampleDate).getTime() : 0;
+        return isNaN(t) ? max : Math.max(max, t);
+    }, 0);
+    return mostRecentMs > 0 ? new Date(mostRecentMs).toISOString() : '';
+}
+
 export function buildHistoryEfItems(groups: ExposureGroupRaw[] | undefined | null): ExceedanceFractionItem[] {
     if (!groups || !groups.length) return [];
     const items: ExceedanceFractionItem[] = [];
@@ -109,6 +119,7 @@ export function buildHistoryEfItems(groups: ExposureGroupRaw[] | undefined | nul
                 PrevDateCalculated: prev?.DateCalculated ?? '',
                 Trend: trend,
                 Delta: delta,
+                MostRecentSampleDate: mostRecentSampleDate(results),
             });
         });
     }
@@ -152,6 +163,7 @@ export function buildLatestEfItems(groups: ExposureGroupRaw[] | undefined | null
             Delta: delta,
             PrevExceedanceFraction: prevEntry?.ExceedanceFraction ?? null,
             PrevDateCalculated: prevEntry?.DateCalculated ?? '',
+            MostRecentSampleDate: mostRecentSampleDate(results),
         });
     }
     return items.sort((a, b) => new Date(b.DateCalculated || 0).getTime() - new Date(a.DateCalculated || 0).getTime());

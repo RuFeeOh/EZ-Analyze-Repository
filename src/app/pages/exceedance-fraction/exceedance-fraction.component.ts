@@ -70,6 +70,7 @@ export class ExceedanceFractionComponent {
     new EzColumn({ Name: 'Agent', DisplayName: 'Agent' }),
     new EzColumn({ Name: 'OELNumber', DisplayName: 'OEL' }),
     new EzColumn({ Name: 'DateCalculated', DisplayName: 'Calculation Date', Format: 'date' }),
+    new EzColumn({ Name: 'MostRecentSampleDate', DisplayName: 'Most Recent Sample Date', Format: 'date' }),
     new EzColumn({ Name: 'SamplesUsed', DisplayName: 'Samples Used' })
   ];
   readonly efDetailColumns: string[] = ['SampleDate', 'ExposureGroup', 'TWA', 'Notes', 'SampleNumber'];
