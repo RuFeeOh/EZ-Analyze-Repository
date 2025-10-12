@@ -16,6 +16,10 @@ import { MatTooltipModule } from '@angular/material/tooltip';
 import { MatSliderModule } from '@angular/material/slider';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatSlideToggleModule } from '@angular/material/slide-toggle';
+import { MatMenuModule } from '@angular/material/menu';
+import { MatButtonToggleModule } from '@angular/material/button-toggle';
+import { MatFormFieldModule } from '@angular/material/form-field';
+import { MatInputModule } from '@angular/material/input';
 import { EzTableComponent } from '../../features/ez-table/ez-table.component';
 import { SampleInfo } from '../../models/sample-info.model';
 import { Observable, combineLatest, of, firstValueFrom } from 'rxjs';
@@ -27,7 +31,7 @@ import * as XLSX from 'xlsx';
 
 @Component({
   selector: 'app-exceedance-fraction',
-  imports: [CommonModule, FormsModule, MatTableModule, MatIconModule, MatButtonModule, MatSlideToggleModule, MatTooltipModule, MatSliderModule, MatProgressSpinnerModule, MatCheckboxModule, EzTableComponent],
+  imports: [CommonModule, FormsModule, MatTableModule, MatIconModule, MatButtonModule, MatSlideToggleModule, MatTooltipModule, MatSliderModule, MatProgressSpinnerModule, MatCheckboxModule, MatMenuModule, MatButtonToggleModule, MatFormFieldModule, MatInputModule, EzTableComponent],
   templateUrl: './exceedance-fraction.component.html',
   styleUrl: './exceedance-fraction.component.scss'
 })
@@ -270,58 +274,6 @@ export class ExceedanceFractionComponent {
   // Close on Escape
   @HostListener('document:keydown.escape') onEscape() {
     if (this.editingCustom()) this.editingCustom.set(false);
-  }
-
-  async exportEf() {
-    try {
-      // Use the filtered stream that matches the current table view
-      const items = await firstValueFrom(this.showLatest() ? this.filteredLatestEfItems$ : this.filteredEfItems$);
-      const rows = (items || []).map((it: any) => {
-        const results = Array.isArray(it?.ResultsUsed) ? it.ResultsUsed : [];
-        // Compute most recent sample date across ResultsUsed
-        const mostRecentDate = results.reduce((max: number, r: any) => {
-          const t = r?.SampleDate ? new Date(r.SampleDate).getTime() : 0;
-          return isNaN(t) ? max : Math.max(max, t);
-        }, 0);
-        const dateStr = mostRecentDate
-          ? new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(mostRecentDate))
-          : '';
-        const efPct = ((typeof it?.ExceedanceFraction === 'number' ? it.ExceedanceFraction : 0) * 100).toFixed(2);
-        return {
-          ExposureGroup: String(it?.ExposureGroup ?? ''),
-          ExceedanceFractionPct: efPct,
-          MostRecentSampleDate: dateStr,
-        };
-      });
-      const header = ['Exposure Group', 'Exceedance Fraction (%)', 'Most Recent Sample Date'];
-      const csv = [header.join(','), ...rows.map(r => [
-        // Basic CSV escaping for commas/quotes
-        csvEscape(r.ExposureGroup),
-        String(r.ExceedanceFractionPct),
-        csvEscape(r.MostRecentSampleDate),
-      ].join(','))].join('\n');
-      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      const nowCsv = new Date();
-      const tsCsv = `${String(nowCsv.getMonth() + 1).padStart(2, '0')}-${String(nowCsv.getDate()).padStart(2, '0')}-${nowCsv.getFullYear()}`;
-      a.href = url;
-      a.download = `exceedance-fraction-${this.showLatest() ? 'latest' : 'history'}-${tsCsv}.csv`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-    } catch (e) {
-      console.error('Export failed', e);
-    }
-
-    function csvEscape(v: any): string {
-      const s = String(v ?? '');
-      if (s.includes('"') || s.includes(',') || s.includes('\n')) {
-        return '"' + s.replace(/"/g, '""') + '"';
-      }
-      return s;
-    }
   }
 
   async exportEfExcel() {

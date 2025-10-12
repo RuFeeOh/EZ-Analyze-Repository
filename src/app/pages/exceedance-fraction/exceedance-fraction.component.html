@@ -1,39 +1,58 @@
-<div class="ef-toolbar"
-     style="display:flex; align-items:center; gap:12px; margin-bottom:8px;">
-     <mat-slide-toggle [checked]="showLatest()"
-                       (change)="showLatest.set($event.checked)">
-          Show Latest
-     </mat-slide-toggle>
-     <button mat-button
-             type="button"
-             (click)="showUndo.set(!showUndo())"
-             [disabled]="false">
-          {{ showUndo() ? 'Hide Undo' : 'Undo Import' }}
-     </button>
-     <button mat-stroked-button
-             type="button"
-             (click)="exportEfExcel()"
-             [disabled]="false">
-          Export Excel
-     </button>
-     <button mat-flat-button
-             color="warn"
-             type="button"
-             (click)="deleteSelectedGroups()"
-             [disabled]="!selection.hasValue()">
-          Delete Selected
-     </button>
-     <input type="text"
-            placeholder="Filter by Exposure Group"
-            [value]="filter()"
-            (input)="filter.set(($any($event.target).value || ''))"
-            style="flex:1; max-width:320px; padding:6px 10px; border:1px solid #ccc; border-radius:4px;" />
-     <div class="most-recent-sample"
-          *ngIf="mostRecentSampleDate$ | async as date">
-          <span class="label">Most Recent Sample:</span>
-          <span class="value">{{ date | date:'mediumDate' }}</span>
+<div class="ef-toolbar">
+     <div class="left">
+
+          <button mat-flat-button
+                  color="warn"
+                  type="button"
+                  [disabled]="!selection.hasValue()"
+                  (click)="deleteSelectedGroups()">
+               <mat-icon>delete</mat-icon>
+               <span>Delete ({{ selection.selected.length }})</span>
+          </button>
+          <mat-button-toggle-group [value]="showLatest() ? 'latest' : 'history'"
+                                   (change)="showLatest.set(($any($event).value ?? $any($event)?.source?.value) === 'latest')"
+                                   aria-label="Select EF view">
+               <mat-button-toggle value="latest">
+                    <mat-icon inline>check_circle</mat-icon>
+                    <span>Latest</span>
+               </mat-button-toggle>
+               <mat-button-toggle value="history">
+                    <mat-icon inline>history</mat-icon>
+                    <span>History</span>
+               </mat-button-toggle>
+          </mat-button-toggle-group>
+          <button mat-stroked-button
+                  type="button"
+                  [matMenuTriggerFor]="moreMenu">
+               <mat-icon>more_vert</mat-icon>
+               <span>More</span>
+          </button>
+
+     </div>
+
+     <div class="right">
+          <div class="most-recent-sample">
+               <span class="label">Most Recent Sample:</span>
+               <span class="value">{{ (mostRecentSampleDate$ | async) | date:'mediumDate' }}</span>
+          </div>
      </div>
 </div>
+
+<mat-menu #moreMenu="matMenu">
+     <button mat-menu-item
+             type="button"
+             (click)="exportEfExcel()">
+          <mat-icon>grid_on</mat-icon>
+          <span>Export Excel</span>
+     </button>
+     <button mat-menu-item
+             type="button"
+             (click)="showUndo.set(!showUndo())">
+          <mat-icon>undo</mat-icon>
+          <span>{{ showUndo() ? 'Hide Undo' : 'Undo Import' }}</span>
+     </button>
+
+</mat-menu>
 
 @if (showUndo()) {
 <div class="undo-panel"
@@ -70,8 +89,28 @@
 </div>
 }
 
-<div class="ef-legend"
-     style="display:flex; align-items:center; gap:12px; margin: 4px 0 8px 0; font-size: 12px;">
+
+<div class="ef-actions">
+
+     <mat-form-field appearance="outline"
+                     class="filter-field">
+          <mat-icon matPrefix>search</mat-icon>
+          <input matInput
+                 placeholder="Filter by Exposure Group"
+                 [value]="filter()"
+                 (input)="filter.set(($any($event.target).value || ''))" />
+          <button mat-icon-button
+                  class="compact"
+                  matSuffix
+                  type="button"
+                  *ngIf="filter()"
+                  aria-label="Clear filter"
+                  (click)="filter.set('')">
+               <mat-icon>close</mat-icon>
+          </button>
+     </mat-form-field>
+</div>
+<div class="ef-legend">
      <span>Legend:</span>
      <button type="button"
              class="ef-badge ef-good"
@@ -150,17 +189,17 @@
                     style="vertical-align: middle; color:#16a34a;">arrow_downward</mat-icon> good</span>
 
 </div>
-
 @let efItems = (showLatest() ? (filteredLatestEfItems$ | async) : (filteredEfItems$ | async));
 
 <div class="table-wrapper"
      style="position:relative;">
+     @if (!efItems) {
      <div class="spinner-overlay"
-          *ngIf="!efItems"
           style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; z-index: 2;">
           <mat-progress-spinner mode="indeterminate"
                                 diameter="48"></mat-progress-spinner>
      </div>
+     }
 
      <ez-table [items]="efItems ?? []"
                [summaryColumns]="efSummaryColumnsWithSelect"

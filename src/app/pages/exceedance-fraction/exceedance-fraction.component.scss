@@ -1,3 +1,44 @@
+/* EF toolbar layout */
+.ef-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 8px;
+    flex-wrap: wrap;
+}
+
+.ef-toolbar .left,
+.ef-toolbar .right {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.ef-toolbar .left {
+    flex: 1 1 520px;
+    min-width: 300px;
+}
+
+.ef-toolbar .right {
+    flex: 0 0 auto;
+}
+
+.filter-field {
+    flex: 1 1 auto;
+    min-width: 220px;
+}
+
+/* Tighten button-toggle appearance */
+::ng-deep .mat-button-toggle-group {
+    border-radius: 8px;
+}
+
+::ng-deep .mat-button-toggle {
+    padding: 0 8px;
+}
+
 /* Reuse badge palette for legend (same class names as ez-table) */
 .ef-badge {
     display: inline-block;
@@ -309,6 +350,65 @@
     background: rgba(255, 255, 255, 0.05);
     border: 1px solid rgba(255, 255, 255, 0.1);
     border-radius: 4px;
+}
+
+/* Legend alignment to the right and clean spacing */
+.ef-legend {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 4px 0 8px 0;
+    font-size: 12px;
+    justify-content: flex-end;
+    /* push to right */
+}
+
+/* Actions row containing Actions button and the filter; filter grows to fill */
+.ef-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 6px 0 10px 0;
+}
+
+.ef-actions .filter-field {
+    flex: 1 1 600px;
+    /* grow across available width */
+}
+
+/* Make the filter input the same height as the actions button */
+.ef-actions .mat-mdc-form-field-infix {
+    padding-top: 12px;
+    padding-bottom: 12px;
+}
+
+.ef-actions .mat-mdc-form-field:not(.mat-form-field-appearance-legacy) .mat-mdc-form-field-flex {
+    height: 40px;
+    /* approx height of stroked button */
+}
+
+.ef-actions button[mat-stroked-button] {
+    height: 40px;
+}
+
+/* Compact the clear button in the form field */
+.ef-actions .compact.mat-mdc-icon-button {
+    width: 36px;
+    height: 36px;
+}
+
+@media (max-width: 700px) {
+    .ef-toolbar .left {
+        flex: 1 1 100%;
+    }
+
+    .ef-actions {
+        flex-wrap: wrap;
+    }
+
+    .ef-actions .filter-field {
+        flex-basis: 100%;
+    }
 }
 
 .most-recent-sample .label {
