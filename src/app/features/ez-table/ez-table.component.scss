@@ -108,3 +108,28 @@ tr.detail-row {
 tr:not(.detail-row):not(.mat-mdc-header-row):hover {
     background: rgba(225, 225, 225, 0.05);
 }
+
+/* Sticky left Select column */
+.sticky-left {
+    position: sticky;
+    left: 0;
+    z-index: 3;
+    /* keep above other cells when horizontal scrolling */
+    background: inherit;
+    /* match row background */
+}
+
+/* Narrow, consistent width for the Select checkbox column */
+.select-col {
+    width: 56px;
+    /* matches typical icon/checkbox column */
+    min-width: 56px;
+    max-width: 56px;
+    padding-left: 8px;
+    padding-right: 8px;
+}
+
+/* Ensure header cell sticks above rows */
+.mat-mdc-header-row .sticky-left {
+    z-index: 4;
+}

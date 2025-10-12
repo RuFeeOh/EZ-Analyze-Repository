@@ -16,6 +16,13 @@
              [disabled]="false">
           Export Excel
      </button>
+     <button mat-flat-button
+             color="warn"
+             type="button"
+             (click)="deleteSelectedGroups()"
+             [disabled]="!selection.hasValue()">
+          Delete Selected
+     </button>
      <input type="text"
             placeholder="Filter by Exposure Group"
             [value]="filter()"
@@ -156,13 +163,25 @@
      </div>
 
      <ez-table [items]="efItems ?? []"
-               [summaryColumns]="efSummaryColumns"
+               [summaryColumns]="efSummaryColumnsWithSelect"
                [detailColumns]="efDetailColumns"
                [detailFor]="efDetailForItem"
                [filterText]="filter()"
                filterKey="ExposureGroup"
                defaultSortActive="ExposureGroup"
                defaultSortDirection="asc">
+          <ng-template #headerCell
+                       let-id="id">
+               <ng-container [ngSwitch]="id">
+                    <ng-container *ngSwitchCase="'Select'">
+                         <mat-checkbox (change)="$event ? toggleAllRows(efItems ?? []) : null"
+                                       [checked]="isAllSelected(efItems ?? [])"
+                                       [indeterminate]="selection.hasValue() && !isAllSelected(efItems ?? [])"
+                                       [aria-label]="checkboxLabel()">
+                         </mat-checkbox>
+                    </ng-container>
+               </ng-container>
+          </ng-template>
           <ng-template #cell
                        let-item
                        let-col="column"
@@ -170,6 +189,13 @@
                        let-section="section"
                        let-value="value">
                <ng-container [ngSwitch]="id">
+                    <ng-container *ngSwitchCase="'Select'">
+                         <mat-checkbox (click)="$event.stopPropagation()"
+                                       (change)="$event ? selection.toggle(item) : null"
+                                       [checked]="selection.isSelected(item)"
+                                       [aria-label]="checkboxLabel(item)">
+                         </mat-checkbox>
+                    </ng-container>
                     <ng-container *ngSwitchCase="'ExceedanceFraction'">
                          <span class="ef-badge"
                                [class.ef-good]="(value ?? 0) < 0.05"

@@ -21,6 +21,7 @@ export interface ExposureGroupRaw {
 
 export interface ExceedanceFractionItem {
     Uid: string;
+    DocUid?: string; // Firestore document id for the exposure group
     ExposureGroup: string;
     Agent: string;
     OELNumber: number | null;
@@ -93,6 +94,7 @@ export function buildHistoryEfItems(groups: ExposureGroupRaw[] | undefined | nul
     for (const g of groups) {
         const name = g?.ExposureGroup ?? g?.Group ?? '';
         if (!name) continue;
+        const docUid = (g as any)?.Uid ?? undefined;
         const { asc } = getSortedHistories(g);
         asc.forEach((ef, idx) => {
             const prev = idx > 0 ? asc[idx - 1] : undefined;
@@ -107,6 +109,7 @@ export function buildHistoryEfItems(groups: ExposureGroupRaw[] | undefined | nul
             const results = ef?.ResultsUsed ?? [];
             items.push({
                 Uid: `${name}__${ef?.DateCalculated || 'no-date'}__${idx}`,
+                DocUid: docUid,
                 ExposureGroup: name,
                 Agent: firstAgent(results),
                 OELNumber: ef?.OELNumber ?? g?.LatestExceedanceFraction?.OELNumber ?? null,
@@ -133,6 +136,7 @@ export function buildLatestEfItems(groups: ExposureGroupRaw[] | undefined | null
     for (const g of groups) {
         const name = g?.ExposureGroup ?? g?.Group ?? '';
         if (!name) continue;
+        const docUid = (g as any)?.Uid ?? undefined;
         const { desc } = getSortedHistories(g);
         const latest = desc[0] || g.LatestExceedanceFraction;
         if (!latest) continue;
@@ -151,6 +155,7 @@ export function buildLatestEfItems(groups: ExposureGroupRaw[] | undefined | null
         const prevEntry = desc.length >= 2 ? desc[1] : undefined;
         items.push({
             Uid: `${name}__latest__${latest?.DateCalculated || 'no-date'}`,
+            DocUid: docUid,
             ExposureGroup: name,
             Agent: firstAgent(results),
             OELNumber: latest?.OELNumber ?? g?.LatestExceedanceFraction?.OELNumber ?? null,

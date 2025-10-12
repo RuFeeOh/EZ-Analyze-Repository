@@ -3,13 +3,15 @@ import { FormsModule } from '@angular/forms';
 import { toObservable } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
 import { Firestore } from '@angular/fire/firestore';
-import { collection, query, where, orderBy, doc, getDoc } from 'firebase/firestore';
+import { collection, query, where, orderBy, doc, getDoc, writeBatch } from 'firebase/firestore';
 import { collectionData } from '@angular/fire/firestore';
 import { Functions, httpsCallable } from '@angular/fire/functions';
 import { OrganizationService } from '../../services/organization/organization.service';
 import { MatTableModule } from '@angular/material/table';
 import { MatIconModule } from '@angular/material/icon';
 import { MatButtonModule } from '@angular/material/button';
+import { MatCheckboxModule } from '@angular/material/checkbox';
+import { SelectionModel } from '@angular/cdk/collections';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { MatSliderModule } from '@angular/material/slider';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
@@ -25,7 +27,7 @@ import * as XLSX from 'xlsx';
 
 @Component({
   selector: 'app-exceedance-fraction',
-  imports: [CommonModule, FormsModule, MatTableModule, MatIconModule, MatButtonModule, MatSlideToggleModule, MatTooltipModule, MatSliderModule, MatProgressSpinnerModule, EzTableComponent],
+  imports: [CommonModule, FormsModule, MatTableModule, MatIconModule, MatButtonModule, MatSlideToggleModule, MatTooltipModule, MatSliderModule, MatProgressSpinnerModule, MatCheckboxModule, EzTableComponent],
   templateUrl: './exceedance-fraction.component.html',
   styleUrl: './exceedance-fraction.component.scss'
 })
@@ -43,6 +45,8 @@ export class ExceedanceFractionComponent {
   filteredLatestEfItems$!: Observable<any[]>;
   // Toggle (default ON)
   showLatest = signal(true);
+  // Selection model (always enabled on this page)
+  selection = new SelectionModel<any>(true, []);
   // Undo Import UI
   showUndo = signal(false);
   selectedJobId = signal<string | null>(null);
@@ -76,6 +80,11 @@ export class ExceedanceFractionComponent {
   ];
   readonly efDetailColumns: string[] = ['SampleDate', 'ExposureGroup', 'TWA', 'Notes', 'SampleNumber'];
   readonly efDetailForItem = (item: any) => item?.ResultsUsed ?? [];
+  // When selecting, prepend a checkbox column
+  readonly efSummaryColumnsWithSelect = [
+    new EzColumn({ Name: 'Select', DisplayName: '', Sortable: false }),
+    ...this.efSummaryColumns
+  ];
 
   constructor() {
     const orgId = this.orgService.orgStore.currentOrg()?.Uid;
@@ -148,6 +157,10 @@ export class ExceedanceFractionComponent {
       })))
     );
   }
+
+  // Selection is always enabled; no toggle handler needed
+
+  // Selection helpers (see methods near the end of the class)
 
   async undoSelectedJob() {
     const orgId = this.orgService.orgStore.currentOrg()?.Uid;
@@ -387,6 +400,57 @@ export class ExceedanceFractionComponent {
       XLSX.writeFile(wb, `updated-ef_${this.showLatest() ? 'latest' : 'history'}_${tsXlsx}.xlsx`);
     } catch (e) {
       console.error('Excel export failed', e);
+    }
+  }
+
+  // Selection helpers use the currently displayed list passed from template
+  isAllSelected(items: any[]): boolean {
+    const total = items?.length || 0;
+    const selected = this.selection.selected.length;
+    return total > 0 && selected === total;
+  }
+
+  toggleAllRows(items: any[]) {
+    if (!Array.isArray(items) || items.length === 0) {
+      this.selection.clear();
+      return;
+    }
+    if (this.isAllSelected(items)) {
+      this.selection.clear();
+    } else {
+      this.selection.clear();
+      this.selection.select(...items);
+    }
+  }
+
+  checkboxLabel(row?: any): string {
+    if (!row) {
+      return `${this.selection.hasValue() ? 'deselect' : 'select'} all`;
+    }
+    const key = row?.ExposureGroup || row?.Uid || '';
+    return `${this.selection.isSelected(row) ? 'deselect' : 'select'} ${key}`;
+  }
+
+  async deleteSelectedGroups() {
+    const orgId = this.orgService.orgStore.currentOrg()?.Uid;
+    if (!orgId) return;
+    const selected = this.selection.selected || [];
+    if (!selected.length) return;
+    const ok = window.confirm(`Delete ${selected.length} exposure group(s)? This cannot be undone.`);
+    if (!ok) return;
+    try {
+      const batch = writeBatch(this.firestore as any);
+      for (const row of selected) {
+        const docId = row?.DocUid || row?.Uid; // prefer DocUid from builder
+        if (!docId) continue;
+        const ref = doc(this.firestore as any, `organizations/${orgId}/exposureGroups/${docId}`);
+        batch.delete(ref);
+      }
+      await batch.commit();
+      this.selection.clear();
+    } catch (e) {
+      console.error('Bulk delete failed', e);
+      alert('Bulk delete failed; see console for details.');
     }
   }
 

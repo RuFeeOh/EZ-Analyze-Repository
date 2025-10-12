@@ -168,7 +168,16 @@ export class EzTableComponent implements AfterViewInit {
   }
 
   get groupColumns(): string[] {
-    return [...(this.hasDetail() ? ['expand'] : []), ...this.summaryColumnIds()];
+    const cols = [...this.summaryColumnIds()];
+    const hasExpand = this.hasDetail();
+    const selectIdx = cols.indexOf('Select');
+    // If Select column exists, put it foremost on the left, then expand (if any), then the rest
+    if (selectIdx > -1) {
+      cols.splice(selectIdx, 1);
+      return ['Select', ...(hasExpand ? ['expand'] : []), ...cols];
+    }
+    // Otherwise keep expand first (when present) followed by all columns
+    return [...(hasExpand ? ['expand'] : []), ...cols];
   }
 
   // Optional: announce sort changes for accessibility
@@ -286,6 +295,9 @@ export class EzTableComponent implements AfterViewInit {
   }
 
   protected isSortable(col: string | EzColumn): boolean {
+    // Do not allow sorting on the Select checkbox column
+    const id = this.columnId(col);
+    if (id === 'Select') return false;
     return typeof col === 'string' ? true : (col.Sortable !== false);
   }
 
@@ -418,4 +430,6 @@ export class EzTableComponent implements AfterViewInit {
   // Content-projected templates for custom cells or detail rendering
   @ContentChild('cell', { read: TemplateRef }) cellTpl?: TemplateRef<any>;
   @ContentChild('detail', { read: TemplateRef }) detailTpl?: TemplateRef<any>;
+  // Optional header cell template for summary columns
+  @ContentChild('headerCell', { read: TemplateRef }) headerTpl?: TemplateRef<any>;
 }
