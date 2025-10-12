@@ -421,3 +421,41 @@
     color: #6366f1;
     /* indigo accent to match the theme */
 }
+
+/* Delete button content centering */
+.btn-content {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    width: 100%;
+    height: 100%;
+}
+
+.btn-spinner {
+    display: inline-block;
+    vertical-align: middle;
+    height: 20px !important;
+    width: 20px !important;
+}
+
+.btn-label {
+    line-height: 2;
+}
+
+/* Normalize icon vertical alignment inside the button */
+button[mat-flat-button] .mat-icon {
+    line-height: 20px;
+    height: 20px;
+    width: 20px;
+}
+
+/* Center label content inside Material buttons to avoid baseline drift */
+button[mat-flat-button] .mdc-button__label,
+.mat-mdc-button .mdc-button__label {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    width: 100%;
+}

@@ -55,6 +55,8 @@ export class ExceedanceFractionComponent {
   showUndo = signal(false);
   selectedJobId = signal<string | null>(null);
   undoBusy = signal(false);
+  // Deletion busy state
+  deleting = signal(false);
   jobs$!: Observable<any[]>;
   // Quick filter by Exposure Group
   filter = signal('');
@@ -390,7 +392,10 @@ export class ExceedanceFractionComponent {
     if (!selected.length) return;
     const ok = window.confirm(`Delete ${selected.length} exposure group(s)? This cannot be undone.`);
     if (!ok) return;
+    let taskId: string | null = null;
     try {
+      this.deleting.set(true);
+      taskId = this.bg.startTask({ label: 'Deleting exposure groups', detail: `${selected.length} group(s)`, kind: 'other', indeterminate: true });
       const batch = writeBatch(this.firestore as any);
       for (const row of selected) {
         const docId = row?.DocUid || row?.Uid; // prefer DocUid from builder
@@ -400,9 +405,14 @@ export class ExceedanceFractionComponent {
       }
       await batch.commit();
       this.selection.clear();
+      try { if (taskId) this.bg.completeTask(taskId, `Deleted ${selected.length} group(s)`); } catch { }
     } catch (e) {
       console.error('Bulk delete failed', e);
+      try { if (taskId) this.bg.failTask(taskId, 'Delete failed'); } catch { }
       alert('Bulk delete failed; see console for details.');
+    }
+    finally {
+      this.deleting.set(false);
     }
   }
 

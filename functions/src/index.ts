@@ -575,6 +575,32 @@ export const bulkImportResults = onCall({ timeoutSeconds: 540, memory: '1GiB' },
                 const existingNorm = (existingResults || []).map(normalizeExisting);
                 const incomingNorm = (incoming || []).map(normalize);
 
+                // Build maps of SampleNumber -> TWA for change detection
+                const toKeyTwaMap = (arr: any[]) => {
+                    const m = new Map<string, number | null>();
+                    for (const r of (arr || [])) {
+                        const sn = (r?.SampleNumber === undefined || r?.SampleNumber === null || r?.SampleNumber === '') ? null : String(r.SampleNumber).trim();
+                        if (sn == null) continue; // ignore unkeyed rows for change detection
+                        const twaVal = (r?.TWA === '' || r?.TWA === undefined || r?.TWA === null) ? null : Number(r.TWA);
+                        m.set(sn, (twaVal === null || isNaN(twaVal)) ? null : twaVal);
+                    }
+                    return m;
+                };
+                const mapsEqual = (a: Map<string, number | null>, b: Map<string, number | null>) => {
+                    if (a.size !== b.size) return false;
+                    for (const [k, v] of a.entries()) {
+                        if (!b.has(k)) return false;
+                        const bv = b.get(k);
+                        if (v === null && bv === null) continue;
+                        if (v === null || bv === null) return false;
+                        if (Number(v) !== Number(bv)) return false;
+                    }
+                    return true;
+                };
+                const prevMap = toKeyTwaMap(existingNorm);
+                const nextMap = toKeyTwaMap(incomingNorm);
+                const unchangedKeyTWA = mapsEqual(prevMap, nextMap);
+
                 // Build map keyed by SampleNumber for replacement, and collect no-key entries separately
                 const bySampleNumber = new Map<string, any>();
                 const noKey: any[] = [];
@@ -609,49 +635,72 @@ export const bulkImportResults = onCall({ timeoutSeconds: 540, memory: '1GiB' },
                 const mergedUnique = [...bySampleNumber.values(), ...noKey];
                 const sorted = mergedUnique.sort((a, b) => parseDateToEpoch(b.SampleDate) - parseDateToEpoch(a.SampleDate));
                 const limited = sorted.slice(0, 30);
-                // Compute EF from most recent TWA>0 within limited
+                // Prepare preview regardless; EF may be reused if inputs are unchanged
                 const mostRecent = getMostRecentSamples(limited as any, 6);
                 const TWAlist = mostRecent.map(r => Number(r.TWA)).filter(n => n > 0);
-                const efVal = (TWAlist.length >= 2) ? calculateExceedanceProbability(TWAlist, 0.05) : 0;
-                const latestEf = createExceedanceFraction(efVal, mostRecent as any, TWAlist);
-                // previous value from existing history prior to this append
-                const prevEfVal = Array.isArray(data.ExceedanceFractionHistory) && data.ExceedanceFractionHistory.length
-                    ? Number((data.ExceedanceFractionHistory[data.ExceedanceFractionHistory.length - 1] as any)?.ExceedanceFraction ?? null)
-                    : null;
                 const nowTs = Timestamp.now();
-                const payload: any = {
-                    OrganizationUid: orgId,
-                    OrganizationName: organizationName || null,
-                    Group: g.groupName,
-                    ExposureGroup: g.groupName,
-                    Results: limited,
-                    ResultsPreview: mostRecent,
-                    ResultsTotalCount: limited.length,
-                    LatestExceedanceFraction: latestEf,
-                    ExceedanceFractionHistory: FieldValue.arrayUnion(latestEf as any),
-                    EFComputedAt: nowTs,
-                    updatedAt: nowTs,
-                    updatedBy: uid,
-                };
-                if (!snap.exists) {
-                    payload.createdAt = nowTs;
-                    payload.createdBy = uid;
+                if (unchangedKeyTWA && data?.LatestExceedanceFraction) {
+                    // Skip EF recompute/history if inputs unchanged; still update Results & Preview
+                    const payload: any = {
+                        OrganizationUid: orgId,
+                        OrganizationName: organizationName || null,
+                        Group: g.groupName,
+                        ExposureGroup: g.groupName,
+                        Results: limited,
+                        ResultsPreview: mostRecent,
+                        ResultsTotalCount: limited.length,
+                        updatedAt: nowTs,
+                        updatedBy: uid,
+                    };
+                    if (!snap.exists) {
+                        payload.createdAt = nowTs;
+                        payload.createdBy = uid;
+                    }
+                    tx.set(parentRef, payload, { merge: true });
+                    // No org summary entry necessary; no EF change
+                    return { entry: null, patch: { groupId, replaced } };
+                } else {
+                    // Compute EF from most recent TWA>0 within limited
+                    const efVal = (TWAlist.length >= 2) ? calculateExceedanceProbability(TWAlist, 0.05) : 0;
+                    const latestEf = createExceedanceFraction(efVal, mostRecent as any, TWAlist);
+                    // previous value from existing history prior to this append
+                    const prevEfVal = Array.isArray(data.ExceedanceFractionHistory) && data.ExceedanceFractionHistory.length
+                        ? Number((data.ExceedanceFractionHistory[data.ExceedanceFractionHistory.length - 1] as any)?.ExceedanceFraction ?? null)
+                        : null;
+                    const payload: any = {
+                        OrganizationUid: orgId,
+                        OrganizationName: organizationName || null,
+                        Group: g.groupName,
+                        ExposureGroup: g.groupName,
+                        Results: limited,
+                        ResultsPreview: mostRecent,
+                        ResultsTotalCount: limited.length,
+                        LatestExceedanceFraction: latestEf,
+                        ExceedanceFractionHistory: FieldValue.arrayUnion(latestEf as any),
+                        EFComputedAt: nowTs,
+                        updatedAt: nowTs,
+                        updatedBy: uid,
+                    };
+                    if (!snap.exists) {
+                        payload.createdAt = nowTs;
+                        payload.createdBy = uid;
+                    }
+                    tx.set(parentRef, payload, { merge: true });
+                    // Build summary entry for org-level EfSummary map
+                    const agentVal = (mostRecent && mostRecent.length) ? (mostRecent[0] as any)?.Agent ?? null : null;
+                    const entry = {
+                        GroupId: groupId,
+                        ExposureGroup: g.groupName,
+                        ExceedanceFraction: latestEf.ExceedanceFraction,
+                        PreviousExceedanceFraction: prevEfVal,
+                        Agent: agentVal,
+                        OELNumber: latestEf.OELNumber,
+                        DateCalculated: latestEf.DateCalculated,
+                        SamplesUsedCount: latestEf.MostRecentNumber,
+                    };
+                    // Return both entry and undo metadata for this group
+                    return { entry, patch: { groupId, replaced, efAdded: latestEf } };
                 }
-                tx.set(parentRef, payload, { merge: true });
-                // Build summary entry for org-level EfSummary map
-                const agentVal = (mostRecent && mostRecent.length) ? (mostRecent[0] as any)?.Agent ?? null : null;
-                const entry = {
-                    GroupId: groupId,
-                    ExposureGroup: g.groupName,
-                    ExceedanceFraction: latestEf.ExceedanceFraction,
-                    PreviousExceedanceFraction: prevEfVal,
-                    Agent: agentVal,
-                    OELNumber: latestEf.OELNumber,
-                    DateCalculated: latestEf.DateCalculated,
-                    SamplesUsedCount: latestEf.MostRecentNumber,
-                };
-                // Return both entry and undo metadata for this group
-                return { entry, patch: { groupId, replaced, efAdded: latestEf } };
             });
             // Stage for a single org doc update after loop
             if (txResult?.entry) {

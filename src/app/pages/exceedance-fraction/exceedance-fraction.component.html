@@ -4,10 +4,17 @@
           <button mat-flat-button
                   color="warn"
                   type="button"
-                  [disabled]="!selection.hasValue()"
-                  (click)="deleteSelectedGroups()">
-               <mat-icon>delete</mat-icon>
-               <span>Delete ({{ selection.selected.length }})</span>
+                  (click)="deleteSelectedGroups()"
+                  [disabled]="!selection.hasValue() || deleting()">
+               <span class="btn-content">
+                    <mat-icon *ngIf="!deleting()">delete</mat-icon>
+                    <mat-progress-spinner *ngIf="deleting()"
+                                          class="btn-spinner"
+                                          mode="indeterminate"
+                                          diameter="20"
+                                          strokeWidth="3"></mat-progress-spinner>
+                    <span class="btn-label">Delete ({{ selection.selected.length }})</span>
+               </span>
           </button>
           <mat-button-toggle-group [value]="showLatest() ? 'latest' : 'history'"
                                    (change)="showLatest.set(($any($event).value ?? $any($event)?.source?.value) === 'latest')"
