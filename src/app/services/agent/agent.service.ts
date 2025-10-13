@@ -3,14 +3,24 @@ import { Firestore, collection, collectionData, CollectionReference, doc, setDoc
 import { serverTimestamp } from 'firebase/firestore';
 import { Auth } from '@angular/fire/auth';
 import { Agent } from '../../models/agent.model';
-import { Observable } from 'rxjs';
+import { Observable, shareReplay, switchMap } from 'rxjs';
 import { createInjectionContext } from '../../utils/create-injection-context.decorator';
+import { OrganizationService } from '../organization/organization.service';
+import { OrganizationStore } from '../organization/organization.store';
 
 @Injectable({ providedIn: 'root' })
 export class AgentService {
     private firestore = inject(Firestore);
     private auth = inject(Auth);
     private env = inject(EnvironmentInjector);
+    private organizationStore = inject(OrganizationStore);
+    /**
+     * Observable to shareReplay of agents list
+     */
+    agents$: Observable<Agent[]> = this.organizationStore.currentOrg$.pipe(
+        switchMap(org => this.list(org?.Uid || '')),
+        shareReplay({ bufferSize: 1, refCount: true })
+    );
 
     private agentsRef(orgId: string): CollectionReference {
         return collection(this.firestore as any, `organizations/${orgId}/agents`) as any;

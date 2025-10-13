@@ -14,7 +14,37 @@
          <a mat-list-item
             *ngIf="organizationService.orgStore.currentOrg()?.Name"
             routerLink="/exceedance-fraction"
-            routerLinkActive="mdc-list-item--activated">Exceedance Fractions</a>
+            [queryParams]="{ agent: 'all' }"
+            [queryParamsHandling]="'merge'"
+            [class.mdc-list-item--activated]="router.isActive('/exceedance-fraction', { paths: 'subset', queryParams: 'subset', fragment: 'ignored', matrixParams: 'ignored' })">
+            Exceedance Fractions
+         </a>
+
+         <!-- If exceedance-fraction page is active -->
+         @if (
+         router.isActive('/exceedance-fraction', { paths: 'subset', queryParams: 'subset', fragment: 'ignored', matrixParams: 'ignored' })
+         && agents().length > 1
+         ) {
+         <div class="agent-list">
+            <a mat-list-item
+               class="sub-item"
+               routerLink="/exceedance-fraction"
+               [queryParams]="{ agent: 'all' }"
+               routerLinkActive="mdc-list-item--activated">
+               All
+            </a>
+            @for (a of agents(); track $index) {
+            <a mat-list-item
+               class="sub-item"
+               routerLink="/exceedance-fraction"
+               [queryParams]="{ agent: a?.Name }"
+               routerLinkActive="mdc-list-item--activated">
+               {{ a?.Name }}
+            </a>
+            }
+         </div>
+         }
+
          <a mat-list-item
             *ngIf="organizationService.orgStore.currentOrg()?.Name"
             routerLink="/exposure-groups"

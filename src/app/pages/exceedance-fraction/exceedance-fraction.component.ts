@@ -1,6 +1,6 @@
-import { Component, ElementRef, HostListener, ViewChild, inject, signal } from '@angular/core';
+import { Component, ElementRef, HostListener, ViewChild, inject, signal, DestroyRef } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { toObservable } from '@angular/core/rxjs-interop';
+import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
 import { Firestore } from '@angular/fire/firestore';
 import { collection, query, where, orderBy, doc, getDoc, writeBatch } from 'firebase/firestore';
@@ -28,6 +28,7 @@ import { buildHistoryEfItems, buildLatestEfItems } from '../../utils/ef-items.ut
 import { EzColumn } from '../../models/ez-column.model';
 import { BackgroundStatusService } from '../../services/background-status/background-status.service';
 import * as XLSX from 'xlsx';
+import { ActivatedRoute, Router } from '@angular/router';
 
 @Component({
   selector: 'app-exceedance-fraction',
@@ -40,6 +41,9 @@ export class ExceedanceFractionComponent {
   private fns = inject(Functions);
   private orgService = inject(OrganizationService);
   private bg = inject(BackgroundStatusService);
+  private route = inject(ActivatedRoute);
+  private router = inject(Router);
+  private destroyRef = inject(DestroyRef);
   exposureGroups$!: Observable<any[]>;
   resultsData: SampleInfo[] = [];
   // Streams
@@ -58,8 +62,10 @@ export class ExceedanceFractionComponent {
   // Deletion busy state
   deleting = signal(false);
   jobs$!: Observable<any[]>;
-  // Quick filter by Exposure Group
+  // Quick filter by Exposure Group (used by table's built-in filtering)
   filter = signal('');
+  // Separate Agent filter (applied to the dataset before handing to the table)
+  agentFilter = signal('');
   // Legend bucket filter: '', 'good' (<5%), 'warn' (5-20%), 'bad' (>=20%), 'custom' (>= customThreshold)
   bucket = signal<'' | 'good' | 'warn' | 'bad' | 'custom'>('');
   // Custom threshold (fraction). Default 0.25 (25%). Editable via legend chip.
@@ -104,18 +110,33 @@ export class ExceedanceFractionComponent {
     this.latestEfItems$ = this.exposureGroups$.pipe(map(groups => buildLatestEfItems(groups as any)));
     // Wire filtered streams to react to both data and bucket changes
     const bucket$ = toObservable(this.bucket);
-    this.filteredEfItems$ = combineLatest([this.efItems$, bucket$, toObservable(this.customThreshold)]).pipe(
-      map(([items, b, custom]) => {
-        if (!b) return items;
-        if (b === 'custom') return items.filter(i => (i?.ExceedanceFraction ?? 0) >= custom);
-        return items.filter(i => i?.EfBucket === b);
+    const agent$ = toObservable(this.agentFilter);
+    this.filteredEfItems$ = combineLatest([this.efItems$, bucket$, toObservable(this.customThreshold), agent$]).pipe(
+      map(([items, b, custom, agent]) => {
+        let out = items;
+        if (b) {
+          out = (b === 'custom') ? out.filter(i => (i?.ExceedanceFraction ?? 0) >= custom)
+            : out.filter(i => i?.EfBucket === b);
+        }
+        if (agent && agent.trim()) {
+          const a = agent.trim().toLowerCase();
+          out = out.filter(i => String(i?.Agent ?? '').toLowerCase().includes(a));
+        }
+        return out;
       })
     );
-    this.filteredLatestEfItems$ = combineLatest([this.latestEfItems$, bucket$, toObservable(this.customThreshold)]).pipe(
-      map(([items, b, custom]) => {
-        if (!b) return items;
-        if (b === 'custom') return items.filter(i => (i?.ExceedanceFraction ?? 0) >= custom);
-        return items.filter(i => i?.EfBucket === b);
+    this.filteredLatestEfItems$ = combineLatest([this.latestEfItems$, bucket$, toObservable(this.customThreshold), agent$]).pipe(
+      map(([items, b, custom, agent]) => {
+        let out = items;
+        if (b) {
+          out = (b === 'custom') ? out.filter(i => (i?.ExceedanceFraction ?? 0) >= custom)
+            : out.filter(i => i?.EfBucket === b);
+        }
+        if (agent && agent.trim()) {
+          const a = agent.trim().toLowerCase();
+          out = out.filter(i => String(i?.Agent ?? '').toLowerCase().includes(a));
+        }
+        return out;
       })
     );
 
@@ -139,6 +160,13 @@ export class ExceedanceFractionComponent {
         return maxDate > 0 ? new Date(maxDate) : null;
       })
     );
+
+    // React to query param changes: if agent=Name is present, apply agent filter; otherwise, clear it
+    this.route.queryParamMap.pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((params) => {
+        const agent = (params.get('agent') || '').trim();
+        this.agentFilter.set(agent);
+      });
 
     // Recent import jobs (for undo), ordered by completedAt desc, reactive to org changes
     this.jobs$ = toObservable(this.orgService.currentOrg).pipe(
@@ -414,6 +442,21 @@ export class ExceedanceFractionComponent {
     finally {
       this.deleting.set(false);
     }
+  }
+
+  // Clear exposure group filter
+  clearFilter() { this.filter.set(''); }
+
+  // Clear agent filter and remove it from the URL
+  clearAgentFilter() {
+    this.agentFilter.set('');
+    try {
+      this.router.navigate([], {
+        relativeTo: this.route,
+        queryParams: { agent: null },
+        queryParamsHandling: 'merge'
+      });
+    } catch { /* ignore navigation errors */ }
   }
 
 }

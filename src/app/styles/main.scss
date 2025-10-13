@@ -1,4 +1,5 @@
-/* You can add global styles to this file, and also import other style files */
+@use "./materialOverrides/list" as *;
+@use "./materialOverrides/overlay" as *;
 
 html,
 body {
@@ -13,17 +14,4 @@ body {
 
 .firebase-emulator-warning {
     display: none;
-}
-
-/* Ensure mapping dialog uses full requested vw/vh */
-.cdk-overlay-pane.mapping-dialog-panel {
-    width: 60vw !important;
-    height: 75vh !important;
-    max-width: 60vw !important;
-    max-height: 75vh !important;
-}
-
-/* Remove default 560px max width cap for this panel */
-.cdk-overlay-pane.mapping-dialog-panel .mat-mdc-dialog-container {
-    --mat-dialog-container-max-width: none;
 }

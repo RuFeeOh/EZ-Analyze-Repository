@@ -1,0 +1,16 @@
+.mat-mdc-nav-list {
+
+
+    .sub-item {
+        &.mat-mdc-list-item {
+            height: 2rem;
+            font-size: .5rem;
+
+            .mdc-list-item__primary-text {
+                font-size: 1rem;
+                line-height: 2;
+            }
+        }
+    }
+
+}

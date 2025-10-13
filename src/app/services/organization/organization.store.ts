@@ -5,7 +5,7 @@ import { Firestore } from '@angular/fire/firestore'
 import { collection, query, where } from "firebase/firestore";
 import { Observable, defer, map, catchError, of, switchMap, tap } from "rxjs";
 import { Auth, User, user } from "@angular/fire/auth";
-import { toSignal } from '@angular/core/rxjs-interop';
+import { toObservable, toSignal } from '@angular/core/rxjs-interop';
 import { UserService } from "../user/user.service";
 
 class OrganizationStoreState {
@@ -29,6 +29,7 @@ export class OrganizationStore {
     private state = computed(() => this._state());
     public organizationList = computed(() => this.state().organizationList);
     public currentOrg = computed(() => this.state().currentOrg);
+    public currentOrg$: Observable<Organization | null> = toObservable(this.currentOrg);
     public isLoadingOrganizations = computed(() => this.state().isLoadingOrganizations);
     public isErrorLoadingOrganizations = computed(() => this.state().isErrorLoadingOrganizations);
 
