@@ -7,6 +7,8 @@ export class ExceedanceFraction {
     MostRecentNumber: number = 6;
     OELNumber: number = 0.05;
     ResultsUsed: SampleInfo[] = [];
+    AgentKey?: string;
+    AgentName?: string;
     constructor(partial: Partial<ExceedanceFraction> = {}) {
         Object.assign(this, partial);
     }

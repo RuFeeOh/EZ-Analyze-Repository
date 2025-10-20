@@ -165,7 +165,11 @@ export class ExceedanceFractionComponent {
     this.route.queryParamMap.pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((params) => {
         const agent = (params.get('agent') || '').trim();
-        this.agentFilter.set(agent);
+        if (!agent || agent.toLowerCase() === 'all') {
+          this.agentFilter.set('');
+        } else {
+          this.agentFilter.set(agent);
+        }
       });
 
     // Recent import jobs (for undo), ordered by completedAt desc, reactive to org changes
@@ -416,24 +420,28 @@ export class ExceedanceFractionComponent {
   async deleteSelectedGroups() {
     const orgId = this.orgService.orgStore.currentOrg()?.Uid;
     if (!orgId) return;
-    const selected = this.selection.selected || [];
-    if (!selected.length) return;
-    const ok = window.confirm(`Delete ${selected.length} exposure group(s)? This cannot be undone.`);
+    const selectedRows = this.selection.selected || [];
+    if (!selectedRows.length) return;
+    const docIds = new Set<string>();
+    for (const row of selectedRows) {
+      const docId = row?.DocUid || row?.Uid;
+      if (docId) docIds.add(String(docId));
+    }
+    if (!docIds.size) return;
+    const ok = window.confirm(`Delete ${docIds.size} exposure group(s)? This cannot be undone.`);
     if (!ok) return;
     let taskId: string | null = null;
     try {
       this.deleting.set(true);
-      taskId = this.bg.startTask({ label: 'Deleting exposure groups', detail: `${selected.length} group(s)`, kind: 'other', indeterminate: true });
+      taskId = this.bg.startTask({ label: 'Deleting exposure groups', detail: `${docIds.size} group(s)`, kind: 'other', indeterminate: true });
       const batch = writeBatch(this.firestore as any);
-      for (const row of selected) {
-        const docId = row?.DocUid || row?.Uid; // prefer DocUid from builder
-        if (!docId) continue;
+      for (const docId of docIds) {
         const ref = doc(this.firestore as any, `organizations/${orgId}/exposureGroups/${docId}`);
         batch.delete(ref);
       }
       await batch.commit();
       this.selection.clear();
-      try { if (taskId) this.bg.completeTask(taskId, `Deleted ${selected.length} group(s)`); } catch { }
+      try { if (taskId) this.bg.completeTask(taskId, `Deleted ${docIds.size} group(s)`); } catch { }
     } catch (e) {
       console.error('Bulk delete failed', e);
       try { if (taskId) this.bg.failTask(taskId, 'Delete failed'); } catch { }

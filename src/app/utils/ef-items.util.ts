@@ -9,6 +9,8 @@ export interface ExceedanceFractionHistoryEntry {
     ExceedanceFraction?: number;
     OELNumber?: number | null;
     ResultsUsed?: any[];
+    AgentKey?: string;
+    AgentName?: string;
 }
 
 export interface ExposureGroupRaw {
@@ -16,6 +18,8 @@ export interface ExposureGroupRaw {
     Group?: string;         // fallback name property
     ExceedanceFractionHistory?: ExceedanceFractionHistoryEntry[];
     LatestExceedanceFraction?: ExceedanceFractionHistoryEntry;
+    LatestExceedanceFractionByAgent?: Record<string, ExceedanceFractionHistoryEntry>;
+    ExceedanceFractionHistoryByAgent?: Record<string, ExceedanceFractionHistoryEntry[]>;
     [key: string]: any; // allow other properties
 }
 
@@ -75,8 +79,15 @@ function getSortedHistories(group: ExposureGroupRaw): GroupCacheEntry {
 
 function firstAgent(results: any[]): string {
     if (!Array.isArray(results)) return '';
-    const found = results.find(r => !!r?.Agent);
-    return found?.Agent ?? '';
+    const found = results.find(r => !!(r?.AgentName || r?.Agent));
+    return found?.AgentName ?? found?.Agent ?? '';
+}
+
+function snapshotAgentName(snapshot: any): string {
+    if (!snapshot || typeof snapshot !== 'object') return '';
+    if (snapshot.AgentName) return snapshot.AgentName;
+    if (snapshot.Agent) return snapshot.Agent;
+    return firstAgent(snapshot.ResultsUsed ?? []);
 }
 
 function mostRecentSampleDate(results: any[]): string {
@@ -95,6 +106,46 @@ export function buildHistoryEfItems(groups: ExposureGroupRaw[] | undefined | nul
         const name = g?.ExposureGroup ?? g?.Group ?? '';
         if (!name) continue;
         const docUid = (g as any)?.Uid ?? undefined;
+        const byAgentHistory = g && typeof (g as any).ExceedanceFractionHistoryByAgent === 'object'
+            ? (g as any).ExceedanceFractionHistoryByAgent as Record<string, any[]>
+            : null;
+        if (byAgentHistory && Object.keys(byAgentHistory).length) {
+            for (const [agentKey, history] of Object.entries(byAgentHistory)) {
+                if (!Array.isArray(history) || history.length === 0) continue;
+                const asc = [...history].sort((a, b) => new Date(a?.DateCalculated || 0).getTime() - new Date(b?.DateCalculated || 0).getTime());
+                asc.forEach((ef, idx) => {
+                    const prev = idx > 0 ? asc[idx - 1] : undefined;
+                    const prevVal = prev?.ExceedanceFraction ?? null;
+                    const currVal = ef?.ExceedanceFraction ?? 0;
+                    let trend: 'up' | 'down' | 'flat' = 'flat';
+                    if (prevVal != null) {
+                        if (currVal > prevVal) trend = 'up';
+                        else if (currVal < prevVal) trend = 'down';
+                    }
+                    const delta = prevVal != null ? (currVal - prevVal) : 0;
+                    const results = Array.isArray(ef?.ResultsUsed) ? ef.ResultsUsed : [];
+                    const agentName = snapshotAgentName(ef) || snapshotAgentName({ ResultsUsed: results }) || agentKey || '';
+                    items.push({
+                        Uid: `${docUid || name}__${agentKey}__${ef?.DateCalculated || 'no-date'}__${idx}`,
+                        DocUid: docUid,
+                        ExposureGroup: name,
+                        Agent: agentName,
+                        OELNumber: ef?.OELNumber ?? g?.LatestExceedanceFraction?.OELNumber ?? null,
+                        ExceedanceFraction: currVal,
+                        EfBucket: bucketFor(currVal),
+                        DateCalculated: ef?.DateCalculated ?? '',
+                        SamplesUsed: results.length || (ef?.MostRecentNumber ?? 0),
+                        ResultsUsed: results,
+                        PrevExceedanceFraction: prevVal,
+                        PrevDateCalculated: prev?.DateCalculated ?? '',
+                        Trend: trend,
+                        Delta: delta,
+                        MostRecentSampleDate: mostRecentSampleDate(results),
+                    });
+                });
+            }
+            continue;
+        }
         const { asc } = getSortedHistories(g);
         asc.forEach((ef, idx) => {
             const prev = idx > 0 ? asc[idx - 1] : undefined;
@@ -137,6 +188,47 @@ export function buildLatestEfItems(groups: ExposureGroupRaw[] | undefined | null
         const name = g?.ExposureGroup ?? g?.Group ?? '';
         if (!name) continue;
         const docUid = (g as any)?.Uid ?? undefined;
+        const latestByAgent = g && typeof (g as any).LatestExceedanceFractionByAgent === 'object'
+            ? (g as any).LatestExceedanceFractionByAgent as Record<string, any>
+            : null;
+        const historyByAgent = g && typeof (g as any).ExceedanceFractionHistoryByAgent === 'object'
+            ? (g as any).ExceedanceFractionHistoryByAgent as Record<string, any[]>
+            : {};
+        if (latestByAgent && Object.keys(latestByAgent).length) {
+            for (const [agentKey, snapshot] of Object.entries(latestByAgent)) {
+                if (!snapshot || typeof snapshot !== 'object') continue;
+                const history = Array.isArray(historyByAgent[agentKey]) ? historyByAgent[agentKey] : [];
+                const prev = history.length >= 2 ? history[history.length - 2] : undefined;
+                const currVal = snapshot?.ExceedanceFraction ?? 0;
+                const prevVal = prev?.ExceedanceFraction ?? null;
+                let trend: 'up' | 'down' | 'flat' = 'flat';
+                if (prevVal != null) {
+                    if (currVal > prevVal) trend = 'up';
+                    else if (currVal < prevVal) trend = 'down';
+                }
+                const delta = prevVal != null ? currVal - prevVal : 0;
+                const results = Array.isArray(snapshot?.ResultsUsed) ? snapshot.ResultsUsed : [];
+                const agentName = snapshotAgentName(snapshot) || agentKey || '';
+                items.push({
+                    Uid: `${name}__${agentKey}__latest__${snapshot?.DateCalculated || 'no-date'}`,
+                    DocUid: docUid,
+                    ExposureGroup: name,
+                    Agent: agentName,
+                    OELNumber: snapshot?.OELNumber ?? g?.LatestExceedanceFraction?.OELNumber ?? null,
+                    ExceedanceFraction: currVal,
+                    EfBucket: bucketFor(currVal),
+                    DateCalculated: snapshot?.DateCalculated ?? '',
+                    SamplesUsed: results.length || (snapshot?.MostRecentNumber ?? 0),
+                    ResultsUsed: results,
+                    Trend: trend,
+                    Delta: delta,
+                    PrevExceedanceFraction: prevVal,
+                    PrevDateCalculated: prev?.DateCalculated ?? '',
+                    MostRecentSampleDate: mostRecentSampleDate(results),
+                });
+            }
+            continue;
+        }
         const { desc } = getSortedHistories(g);
         const latest = desc[0] || g.LatestExceedanceFraction;
         if (!latest) continue;
@@ -144,31 +236,31 @@ export function buildLatestEfItems(groups: ExposureGroupRaw[] | undefined | null
         let delta = 0;
         if (desc.length >= 2) {
             const curr = latest?.ExceedanceFraction ?? null;
-            const prev = desc[1]?.ExceedanceFraction ?? null;
-            if (curr != null && prev != null) {
-                if (curr > prev) trend = 'up';
-                else if (curr < prev) trend = 'down';
-                delta = curr - prev;
+            const prevLegacy = desc[1]?.ExceedanceFraction ?? null;
+            if (curr != null && prevLegacy != null) {
+                if (curr > prevLegacy) trend = 'up';
+                else if (curr < prevLegacy) trend = 'down';
+                delta = curr - prevLegacy;
             }
         }
-        const results = latest?.ResultsUsed ?? [];
+        const resultsLegacy = latest?.ResultsUsed ?? [];
         const prevEntry = desc.length >= 2 ? desc[1] : undefined;
         items.push({
             Uid: `${name}__latest__${latest?.DateCalculated || 'no-date'}`,
             DocUid: docUid,
             ExposureGroup: name,
-            Agent: firstAgent(results),
+            Agent: firstAgent(resultsLegacy),
             OELNumber: latest?.OELNumber ?? g?.LatestExceedanceFraction?.OELNumber ?? null,
             ExceedanceFraction: latest?.ExceedanceFraction ?? 0,
             EfBucket: bucketFor(latest?.ExceedanceFraction ?? 0),
             DateCalculated: latest?.DateCalculated ?? '',
-            SamplesUsed: results.length || 0,
-            ResultsUsed: results,
+            SamplesUsed: resultsLegacy.length || 0,
+            ResultsUsed: resultsLegacy,
             Trend: trend,
             Delta: delta,
             PrevExceedanceFraction: prevEntry?.ExceedanceFraction ?? null,
             PrevDateCalculated: prevEntry?.DateCalculated ?? '',
-            MostRecentSampleDate: mostRecentSampleDate(results),
+            MostRecentSampleDate: mostRecentSampleDate(resultsLegacy),
         });
     }
     return items.sort((a, b) => new Date(b.DateCalculated || 0).getTime() - new Date(a.DateCalculated || 0).getTime());

@@ -29,6 +29,8 @@ type SampleInfo = {
     TWA: number | string;
     Notes?: string;
     SampleNumber?: string | number;
+    Agent?: string;
+    AgentKey?: string;
 };
 
 type ExceedanceFraction = {
@@ -37,7 +39,22 @@ type ExceedanceFraction = {
     OELNumber: number;
     MostRecentNumber: number;
     ResultsUsed: SampleInfo[];
+    AgentKey?: string;
+    AgentName?: string;
 };
+
+type AgentNormalization = { key: string; name: string };
+
+type AgentEfSnapshot = ExceedanceFraction & { AgentKey: string; AgentName: string };
+
+interface AgentEfState {
+    latestByAgent: Record<string, AgentEfSnapshot>;
+    historyByAgent: Record<string, AgentEfSnapshot[]>;
+    topSnapshot: AgentEfSnapshot | null;
+    topAgentKey: string | null;
+    changedAgentKeys: Set<string>;
+    removedAgentKeys: Set<string>;
+}
 
 function parseDateToEpoch(dateStr?: string | null): number {
     if (!dateStr) return 0;
@@ -49,6 +66,161 @@ function getMostRecentSamples(results: SampleInfo[] = [], max = 6): SampleInfo[]
     const candidates = (results || []).filter(r => r && Number(r.TWA) > 0);
     const sorted = [...candidates].sort((a, b) => parseDateToEpoch(b.SampleDate) - parseDateToEpoch(a.SampleDate));
     return sorted.slice(0, Math.min(max, sorted.length));
+}
+
+function slugifyAgent(value: string): string {
+    return (value || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '').slice(0, 120) || 'unknown';
+}
+
+function normalizeAgent(raw: string | null | undefined): AgentNormalization {
+    const value = typeof raw === 'string' ? raw.trim() : '';
+    if (!value) return { key: 'unknown', name: 'Unknown' };
+    return { key: slugifyAgent(value), name: value };
+}
+
+function compactResults(results: SampleInfo[] | undefined): any[] {
+    if (!Array.isArray(results)) return [];
+    return results.map(r => ({
+        SampleNumber: r?.SampleNumber ?? null,
+        SampleDate: r?.SampleDate ?? null,
+        TWA: r?.TWA ?? null,
+        Agent: r?.Agent ?? '',
+        AgentKey: r?.AgentKey ?? null,
+    }));
+}
+
+function compactEfSnapshot(snapshot: any) {
+    if (!snapshot || typeof snapshot !== 'object') return null;
+    return {
+        ExceedanceFraction: typeof snapshot.ExceedanceFraction === 'number' ? snapshot.ExceedanceFraction : null,
+        MostRecentNumber: typeof snapshot.MostRecentNumber === 'number' ? snapshot.MostRecentNumber : null,
+        AgentKey: snapshot.AgentKey ?? null,
+        AgentName: snapshot.AgentName ?? null,
+        Results: compactResults(snapshot.ResultsUsed),
+    };
+}
+
+function deepEqual(a: any, b: any): boolean {
+    try {
+        return JSON.stringify(a) === JSON.stringify(b);
+    } catch {
+        return false;
+    }
+}
+
+function almostEqual(a: number | null | undefined, b: number | null | undefined, epsilon = 1e-6): boolean {
+    const av = typeof a === 'number' ? a : 0;
+    const bv = typeof b === 'number' ? b : 0;
+    return Math.abs(av - bv) <= epsilon;
+}
+
+function normalizeLatestMap(input: any): Record<string, AgentEfSnapshot> {
+    if (!input || typeof input !== 'object') return {};
+    const out: Record<string, AgentEfSnapshot> = {};
+    for (const [key, val] of Object.entries(input)) {
+        if (!val || typeof val !== 'object') continue;
+        const snap = val as AgentEfSnapshot;
+        if (!key) continue;
+        out[key] = {
+            ...snap,
+            AgentKey: snap.AgentKey || key,
+            AgentName: snap.AgentName || 'Unknown',
+        };
+    }
+    return out;
+}
+
+function normalizeHistoryMap(input: any): Record<string, AgentEfSnapshot[]> {
+    if (!input || typeof input !== 'object') return {};
+    const out: Record<string, AgentEfSnapshot[]> = {};
+    for (const [key, val] of Object.entries(input)) {
+        if (!Array.isArray(val)) continue;
+        out[key] = val
+            .filter(entry => entry && typeof entry === 'object')
+            .map(entry => ({
+                ...(entry as AgentEfSnapshot),
+                AgentKey: (entry as any).AgentKey || key,
+                AgentName: (entry as any).AgentName || 'Unknown',
+            }));
+    }
+    return out;
+}
+
+function computeAgentEfState(samples: SampleInfo[], prevLatestInput: any, prevHistoryInput: any): AgentEfState {
+    const grouped = new Map<string, SampleInfo[]>();
+    const agentNameMap: Record<string, string> = {};
+    for (const sample of samples || []) {
+        const { key, name } = normalizeAgent(sample?.Agent);
+        const agentLabel = sample?.Agent && String(sample.Agent).trim() ? String(sample.Agent).trim() : name;
+        const current: SampleInfo = {
+            ...sample,
+            Agent: agentLabel,
+            AgentKey: sample?.AgentKey || key,
+        };
+        agentNameMap[key] = name;
+        const arr = grouped.get(key) || [];
+        arr.push(current);
+        grouped.set(key, arr);
+    }
+    const prevLatest = normalizeLatestMap(prevLatestInput);
+    const prevHistory = normalizeHistoryMap(prevHistoryInput);
+    const latestByAgent: Record<string, AgentEfSnapshot> = {};
+    const historyByAgent: Record<string, AgentEfSnapshot[]> = {};
+    const changedAgentKeys = new Set<string>();
+    const removedAgentKeys = new Set<string>();
+    let topSnapshot: AgentEfSnapshot | null = null;
+    let topAgentKey: string | null = null;
+
+    const allAgentKeys = new Set<string>([...grouped.keys(), ...Object.keys(prevLatest)]);
+    for (const agentKey of allAgentKeys) {
+        const samplesForAgent = grouped.get(agentKey) || [];
+        const mostRecent = getMostRecentSamples(samplesForAgent, 6);
+        if (!mostRecent.length) {
+            if (prevLatest[agentKey]) {
+                changedAgentKeys.add(agentKey);
+                removedAgentKeys.add(agentKey);
+            }
+            continue;
+        }
+        const twaList = mostRecent.map(r => Number(r.TWA)).filter(n => n > 0);
+        const efVal = (twaList.length >= 2) ? calculateExceedanceProbability(twaList, 0.05) : 0;
+        const displayName = agentNameMap[agentKey] || prevLatest[agentKey]?.AgentName || 'Unknown';
+        const snapshot = createExceedanceFraction(efVal, mostRecent, twaList, { key: agentKey, name: displayName }) as AgentEfSnapshot;
+        snapshot.AgentKey = agentKey;
+        snapshot.AgentName = displayName;
+        const prev = prevLatest[agentKey];
+        const prevHistoryForAgent = prevHistory[agentKey] ? [...prevHistory[agentKey]] : [];
+        const sameEf = prev ? almostEqual(prev.ExceedanceFraction, snapshot.ExceedanceFraction) : false;
+        const sameCount = prev ? (prev.MostRecentNumber || 0) === (snapshot.MostRecentNumber || 0) : false;
+        const sameSamples = prev ? deepEqual(compactResults(prev.ResultsUsed), compactResults(snapshot.ResultsUsed)) : false;
+
+        if (prev && sameEf && sameCount && sameSamples) {
+            latestByAgent[agentKey] = prev;
+            historyByAgent[agentKey] = prevHistoryForAgent.length ? prevHistoryForAgent : (prevHistory[agentKey] || []);
+        } else {
+            changedAgentKeys.add(agentKey);
+            const historyLimited = [...prevHistoryForAgent, snapshot];
+            if (historyLimited.length > 50) historyLimited.splice(0, historyLimited.length - 50);
+            historyByAgent[agentKey] = historyLimited;
+            latestByAgent[agentKey] = snapshot;
+        }
+
+        const candidate = latestByAgent[agentKey];
+        if (!candidate) continue;
+        if (!topSnapshot) {
+            topSnapshot = candidate;
+            topAgentKey = agentKey;
+        } else {
+            const betterEf = candidate.ExceedanceFraction > topSnapshot.ExceedanceFraction;
+            const sameEfButMoreSamples = almostEqual(candidate.ExceedanceFraction, topSnapshot.ExceedanceFraction) && (candidate.MostRecentNumber || 0) > (topSnapshot.MostRecentNumber || 0);
+            if (betterEf || sameEfButMoreSamples) {
+                topSnapshot = candidate;
+                topAgentKey = agentKey;
+            }
+        }
+    }
+
+    return { latestByAgent, historyByAgent, topSnapshot, topAgentKey, changedAgentKeys, removedAgentKeys };
 }
 
 // Exceedance Fraction calculation (same as client service)
@@ -79,13 +251,15 @@ function calculateExceedanceProbability(measurements: number[], OEL: number): nu
     return exceedanceProbability;
 }
 
-function createExceedanceFraction(exceedanceFraction: number, resultsUsed: SampleInfo[], TWAlist: number[]): ExceedanceFraction {
+function createExceedanceFraction(exceedanceFraction: number, resultsUsed: SampleInfo[], TWAlist: number[], agent?: AgentNormalization): ExceedanceFraction {
     return {
         ExceedanceFraction: exceedanceFraction,
         DateCalculated: new Date().toISOString(),
         OELNumber: 0.05,
         MostRecentNumber: TWAlist.length,
         ResultsUsed: resultsUsed,
+        AgentKey: agent?.key,
+        AgentName: agent?.name,
     };
 }
 
@@ -409,32 +583,55 @@ export const recomputeEfBatch = onCall(async (request) => {
         if (!snap.exists) return;
         const data = snap.data() || {} as any;
         const parentResults: SampleInfo[] = Array.isArray(data.Results) ? data.Results as any : [];
-        const mostRecent = getMostRecentSamples(parentResults, 6);
-        const TWAlist = mostRecent.map(r => Number(r.TWA));
-        const ef = (TWAlist.length >= 2) ? calculateExceedanceProbability(TWAlist, 0.05) : 0;
-        const latest = createExceedanceFraction(ef, mostRecent, TWAlist);
-        await parentRef.set({
-            LatestExceedanceFraction: latest,
-            ExceedanceFractionHistory: FieldValue.arrayUnion(latest as any),
-            ResultsPreview: mostRecent,
+        const sorted = [...parentResults].sort((a, b) => parseDateToEpoch(b.SampleDate) - parseDateToEpoch(a.SampleDate)).slice(0, 30);
+        const preview = getMostRecentSamples(sorted as any, 6);
+        const agentEfState = computeAgentEfState(sorted as any, data?.LatestExceedanceFractionByAgent, data?.ExceedanceFractionHistoryByAgent);
+        let topSnapshot = agentEfState.topSnapshot;
+        if (!topSnapshot) {
+            const fallbackMostRecent = getMostRecentSamples(sorted as any, 6);
+            const fallbackTwa = fallbackMostRecent.map(r => Number(r.TWA)).filter(n => n > 0);
+            const fallback = createExceedanceFraction((fallbackTwa.length >= 2) ? calculateExceedanceProbability(fallbackTwa, 0.05) : 0, fallbackMostRecent as any, fallbackTwa, { key: 'unknown', name: 'Unknown' }) as AgentEfSnapshot;
+            fallback.AgentKey = fallback.AgentKey || 'unknown';
+            fallback.AgentName = fallback.AgentName || 'Unknown';
+            topSnapshot = fallback;
+        }
+        const prevTopCompact = compactEfSnapshot(data?.LatestExceedanceFraction);
+        const newTopCompact = compactEfSnapshot(topSnapshot);
+        const topChanged = !deepEqual(prevTopCompact, newTopCompact);
+        const byAgentSummary = Object.fromEntries(Object.entries(agentEfState.latestByAgent).map(([key, snap]) => [key, {
+            Agent: snap.AgentName,
+            AgentKey: snap.AgentKey,
+            ExceedanceFraction: snap.ExceedanceFraction,
+            DateCalculated: snap.DateCalculated,
+            SamplesUsedCount: snap.MostRecentNumber,
+        }]));
+        const nowTs = Timestamp.now();
+        const payload: any = {
+            ResultsPreview: preview,
             Importing: false,
-            updatedAt: Timestamp.now(),
-        }, { merge: true });
-        // Build EfSummary entry for this group and return for consolidated write
+            updatedAt: nowTs,
+            LatestExceedanceFractionByAgent: agentEfState.latestByAgent,
+            ExceedanceFractionHistoryByAgent: agentEfState.historyByAgent,
+        };
+        if (topSnapshot && (topChanged || !data?.LatestExceedanceFraction)) {
+            payload.LatestExceedanceFraction = topSnapshot;
+            payload.ExceedanceFractionHistory = FieldValue.arrayUnion(topSnapshot as any);
+            payload.EFComputedAt = nowTs;
+        }
+        await parentRef.set(payload, { merge: true });
         try {
-            const prevEfVal = Array.isArray(data.ExceedanceFractionHistory) && data.ExceedanceFractionHistory.length
-                ? Number((data.ExceedanceFractionHistory[data.ExceedanceFractionHistory.length - 1] as any)?.ExceedanceFraction ?? null)
-                : null;
-            const entry = {
+            const entry = topSnapshot ? {
                 GroupId: groupId,
                 ExposureGroup: data.ExposureGroup || data.Group || groupId,
-                ExceedanceFraction: latest.ExceedanceFraction,
-                PreviousExceedanceFraction: prevEfVal,
-                Agent: (mostRecent && mostRecent.length) ? (mostRecent[0] as any)?.Agent ?? null : null,
-                OELNumber: latest.OELNumber,
-                DateCalculated: latest.DateCalculated,
-                SamplesUsedCount: latest.MostRecentNumber,
-            };
+                ExceedanceFraction: topSnapshot.ExceedanceFraction,
+                PreviousExceedanceFraction: prevTopCompact?.ExceedanceFraction ?? null,
+                Agent: topSnapshot.AgentName ?? null,
+                AgentKey: topSnapshot.AgentKey ?? null,
+                OELNumber: topSnapshot.OELNumber,
+                DateCalculated: topSnapshot.DateCalculated,
+                SamplesUsedCount: topSnapshot.MostRecentNumber,
+                ByAgent: byAgentSummary,
+            } : null;
             return entry;
         } catch (e: any) {
             logger.warn('recomputeEfBatch: failed to build EfSummary entry', { orgId, groupId, error: e?.message || String(e) });
@@ -487,7 +684,7 @@ export const bulkImportResults = onCall({ timeoutSeconds: 540, memory: '1GiB' },
     const jobId = chosenId;
     const jobRef = db.doc(`organizations/${orgId}/importJobs/${jobId}`);
 
-    type IncomingSample = { Location?: string; SampleNumber?: string | number | null; SampleDate?: string; ExposureGroup?: string; Agent?: string; TWA?: number | string | null; Notes?: string };
+    type IncomingSample = { Location?: string; SampleNumber?: string | number | null; SampleDate?: string; ExposureGroup?: string; Agent?: string; AgentKey?: string; TWA?: number | string | null; Notes?: string };
     type GroupIn = { groupName: string; samples: IncomingSample[] };
 
     const slugify = (text: string): string => (text || '').toLowerCase().trim().replace(/\s+/g, '-').replace(/[^a-z0-9\-]/g, '').replace(/-+/g, '-').slice(0, 120);
@@ -495,12 +692,15 @@ export const bulkImportResults = onCall({ timeoutSeconds: 540, memory: '1GiB' },
         const sampleNumber = r?.SampleNumber;
         const twaRaw = r?.TWA;
         const twa = (twaRaw === '' || twaRaw === undefined || twaRaw === null) ? null : Number(twaRaw);
+        const agentRaw = typeof r?.Agent === 'string' ? r.Agent.trim() : '';
+        const agentKey = normalizeAgent(agentRaw).key;
         return {
             Location: r?.Location ?? "",
             SampleNumber: (sampleNumber === undefined || sampleNumber === '') ? null : sampleNumber,
             SampleDate: r?.SampleDate ?? "",
             ExposureGroup: r?.ExposureGroup ?? "",
-            Agent: r?.Agent ?? "",
+            Agent: agentRaw,
+            AgentKey: agentKey,
             TWA: twa,
             Notes: r?.Notes ?? "",
         } as IncomingSample;
@@ -549,57 +749,94 @@ export const bulkImportResults = onCall({ timeoutSeconds: 540, memory: '1GiB' },
                 const data = snap.exists ? ((snap.data() || {}) as any) : {};
                 const existingResults: SampleInfo[] = Array.isArray(data.Results) ? (data.Results as any[]) : [];
 
-                // Normalize a row to our canonical shape
-                const normalize = (r: any) => ({
-                    Location: r?.Location ?? "",
-                    SampleNumber: (r?.SampleNumber === undefined || r?.SampleNumber === '') ? null : r?.SampleNumber,
-                    SampleDate: r?.SampleDate ?? "",
-                    ExposureGroup: r?.ExposureGroup || r?.Group || g.groupName,
-                    Agent: r?.Agent ?? "",
-                    TWA: (r?.TWA === '' || r?.TWA === undefined || r?.TWA === null) ? null : Number(r?.TWA),
-                    Notes: r?.Notes ?? "",
-                    ImportJobId: jobId,
-                });
+                // Normalize rows to a canonical shape with agent metadata
+                const normalize = (r: any, isExisting = false) => {
+                    const sampleNumberRaw = r?.SampleNumber;
+                    const twaRaw = r?.TWA;
+                    const twa = (twaRaw === '' || twaRaw === undefined || twaRaw === null) ? null : Number(twaRaw);
+                    const agentRaw = typeof r?.Agent === 'string' ? r.Agent.trim() : '';
+                    const agentKey = (r?.AgentKey && typeof r.AgentKey === 'string') ? r.AgentKey : normalizeAgent(agentRaw).key;
+                    return {
+                        Location: r?.Location ?? "",
+                        SampleNumber: (sampleNumberRaw === undefined || sampleNumberRaw === '') ? null : sampleNumberRaw,
+                        SampleDate: r?.SampleDate ?? "",
+                        ExposureGroup: r?.ExposureGroup || r?.Group || g.groupName,
+                        Agent: agentRaw,
+                        AgentKey: agentKey,
+                        TWA: (twa === null || Number.isNaN(twa)) ? null : twa,
+                        Notes: r?.Notes ?? "",
+                        ImportJobId: isExisting ? (r?.ImportJobId ?? null) : jobId,
+                    };
+                };
 
-                const normalizeExisting = (r: any) => ({
-                    Location: r?.Location ?? "",
-                    SampleNumber: (r?.SampleNumber === undefined || r?.SampleNumber === '') ? null : r?.SampleNumber,
-                    SampleDate: r?.SampleDate ?? "",
-                    ExposureGroup: r?.ExposureGroup || r?.Group || g.groupName,
-                    Agent: r?.Agent ?? "",
-                    TWA: (r?.TWA === '' || r?.TWA === undefined || r?.TWA === null) ? null : Number(r?.TWA),
-                    Notes: r?.Notes ?? "",
-                    ImportJobId: r?.ImportJobId ?? null,
-                });
+                const existingNorm = (existingResults || []).map(r => normalize(r, true));
+                const incomingNorm = (incoming || []).map(r => normalize(r, false));
 
-                const existingNorm = (existingResults || []).map(normalizeExisting);
-                const incomingNorm = (incoming || []).map(normalize);
-
-                // Build maps of SampleNumber -> TWA for change detection
-                const toKeyTwaMap = (arr: any[]) => {
-                    const m = new Map<string, number | null>();
+                const toKeySignatureMap = (arr: any[]) => {
+                    const m = new Map<string, { twa: number | null; agentKey: string }>();
                     for (const r of (arr || [])) {
-                        const sn = (r?.SampleNumber === undefined || r?.SampleNumber === null || r?.SampleNumber === '') ? null : String(r.SampleNumber).trim();
-                        if (sn == null) continue; // ignore unkeyed rows for change detection
-                        const twaVal = (r?.TWA === '' || r?.TWA === undefined || r?.TWA === null) ? null : Number(r.TWA);
-                        m.set(sn, (twaVal === null || isNaN(twaVal)) ? null : twaVal);
+                        const snRaw = (r?.SampleNumber === undefined || r?.SampleNumber === null || r?.SampleNumber === '') ? null : String(r.SampleNumber).trim();
+                        if (snRaw == null) continue;
+                        const agentKey = r?.AgentKey || normalizeAgent(r?.Agent).key;
+                        const twaRaw = (r?.TWA === '' || r?.TWA === undefined || r?.TWA === null) ? null : Number(r.TWA);
+                        const twaVal = (twaRaw === null || Number.isNaN(twaRaw)) ? null : twaRaw;
+                        m.set(snRaw, { twa: twaVal, agentKey });
                     }
                     return m;
                 };
-                const mapsEqual = (a: Map<string, number | null>, b: Map<string, number | null>) => {
+
+                const mapsEqual = (a: Map<string, { twa: number | null; agentKey: string }>, b: Map<string, { twa: number | null; agentKey: string }>) => {
                     if (a.size !== b.size) return false;
                     for (const [k, v] of a.entries()) {
-                        if (!b.has(k)) return false;
                         const bv = b.get(k);
-                        if (v === null && bv === null) continue;
-                        if (v === null || bv === null) return false;
-                        if (Number(v) !== Number(bv)) return false;
+                        if (!bv) return false;
+                        const twaEqual = (v.twa === null && bv.twa === null) || (v.twa !== null && bv.twa !== null && almostEqual(v.twa, bv.twa));
+                        if (!twaEqual) return false;
+                        if ((v.agentKey || '') !== (bv.agentKey || '')) return false;
                     }
                     return true;
                 };
-                const prevMap = toKeyTwaMap(existingNorm);
-                const nextMap = toKeyTwaMap(incomingNorm);
+
+                const prevMap = toKeySignatureMap(existingNorm);
+                const nextMap = toKeySignatureMap(incomingNorm);
                 const unchangedKeyTWA = mapsEqual(prevMap, nextMap);
+
+                const changedAgents = new Set<string>();
+                const unionKeys = new Set<string>([...prevMap.keys(), ...nextMap.keys()]);
+                for (const key of unionKeys) {
+                    const before = prevMap.get(key);
+                    const after = nextMap.get(key);
+                    if (!before && after) {
+                        if (after.agentKey) changedAgents.add(after.agentKey);
+                        continue;
+                    }
+                    if (before && !after) {
+                        if (before.agentKey) changedAgents.add(before.agentKey);
+                        continue;
+                    }
+                    if (!before || !after) continue;
+                    const twaChanged = !((before.twa === null && after.twa === null) || (before.twa !== null && after.twa !== null && almostEqual(before.twa, after.twa)));
+                    const agentChanged = (before.agentKey || '') !== (after.agentKey || '');
+                    if (twaChanged || agentChanged) {
+                        if (before.agentKey) changedAgents.add(before.agentKey);
+                        if (after.agentKey) changedAgents.add(after.agentKey);
+                    }
+                }
+
+                const collectNoKeyAgents = (arr: any[]) => {
+                    const set = new Set<string>();
+                    for (const r of (arr || [])) {
+                        const snRaw = (r?.SampleNumber === undefined || r?.SampleNumber === null || r?.SampleNumber === '') ? null : String(r.SampleNumber).trim();
+                        if (snRaw !== null) continue;
+                        const agentKey = r?.AgentKey || normalizeAgent(r?.Agent).key;
+                        if (agentKey) set.add(agentKey);
+                    }
+                    return set;
+                };
+                const noKeyIncomingAgents = collectNoKeyAgents(incomingNorm);
+                const noKeyExistingAgents = collectNoKeyAgents(existingNorm);
+                for (const agentKey of noKeyIncomingAgents) changedAgents.add(agentKey);
+                for (const agentKey of noKeyExistingAgents) changedAgents.add(agentKey);
 
                 // Build map keyed by SampleNumber for replacement, and collect no-key entries separately
                 const bySampleNumber = new Map<string, any>();
@@ -637,9 +874,11 @@ export const bulkImportResults = onCall({ timeoutSeconds: 540, memory: '1GiB' },
                 const limited = sorted.slice(0, 30);
                 // Prepare preview regardless; EF may be reused if inputs are unchanged
                 const mostRecent = getMostRecentSamples(limited as any, 6);
-                const TWAlist = mostRecent.map(r => Number(r.TWA)).filter(n => n > 0);
                 const nowTs = Timestamp.now();
-                if (unchangedKeyTWA && data?.LatestExceedanceFraction) {
+                const prevLatestByAgent = normalizeLatestMap(data?.LatestExceedanceFractionByAgent);
+                const hasPrevAgentSnapshots = Object.keys(prevLatestByAgent).length > 0;
+                const shouldSkipEf = unchangedKeyTWA && hasPrevAgentSnapshots && changedAgents.size === 0;
+                if (shouldSkipEf && data?.LatestExceedanceFraction) {
                     // Skip EF recompute/history if inputs unchanged; still update Results & Preview
                     const payload: any = {
                         OrganizationUid: orgId,
@@ -660,13 +899,27 @@ export const bulkImportResults = onCall({ timeoutSeconds: 540, memory: '1GiB' },
                     // No org summary entry necessary; no EF change
                     return { entry: null, patch: { groupId, replaced } };
                 } else {
-                    // Compute EF from most recent TWA>0 within limited
-                    const efVal = (TWAlist.length >= 2) ? calculateExceedanceProbability(TWAlist, 0.05) : 0;
-                    const latestEf = createExceedanceFraction(efVal, mostRecent as any, TWAlist);
-                    // previous value from existing history prior to this append
-                    const prevEfVal = Array.isArray(data.ExceedanceFractionHistory) && data.ExceedanceFractionHistory.length
-                        ? Number((data.ExceedanceFractionHistory[data.ExceedanceFractionHistory.length - 1] as any)?.ExceedanceFraction ?? null)
-                        : null;
+                    const agentEfState = computeAgentEfState(limited as any, data?.LatestExceedanceFractionByAgent, data?.ExceedanceFractionHistoryByAgent);
+                    let topSnapshot = agentEfState.topSnapshot;
+                    if (!topSnapshot) {
+                        const fallbackMostRecent = getMostRecentSamples(limited as any, 6);
+                        const fallbackTwa = fallbackMostRecent.map(r => Number(r.TWA)).filter(n => n > 0);
+                        const fallback = createExceedanceFraction((fallbackTwa.length >= 2) ? calculateExceedanceProbability(fallbackTwa, 0.05) : 0, fallbackMostRecent as any, fallbackTwa, { key: 'unknown', name: 'Unknown' }) as AgentEfSnapshot;
+                        fallback.AgentKey = fallback.AgentKey || 'unknown';
+                        fallback.AgentName = fallback.AgentName || 'Unknown';
+                        topSnapshot = fallback;
+                    }
+                    const prevTopCompact = compactEfSnapshot(data?.LatestExceedanceFraction);
+                    const newTopCompact = compactEfSnapshot(topSnapshot);
+                    const topChanged = !deepEqual(prevTopCompact, newTopCompact);
+                    const byAgentSummary = Object.fromEntries(Object.entries(agentEfState.latestByAgent).map(([key, snap]) => [key, {
+                        Agent: snap.AgentName,
+                        AgentKey: snap.AgentKey,
+                        ExceedanceFraction: snap.ExceedanceFraction,
+                        DateCalculated: snap.DateCalculated,
+                        SamplesUsedCount: snap.MostRecentNumber,
+                    }]));
+                    const prevEfVal = prevTopCompact?.ExceedanceFraction ?? null;
                     const payload: any = {
                         OrganizationUid: orgId,
                         OrganizationName: organizationName || null,
@@ -675,31 +928,39 @@ export const bulkImportResults = onCall({ timeoutSeconds: 540, memory: '1GiB' },
                         Results: limited,
                         ResultsPreview: mostRecent,
                         ResultsTotalCount: limited.length,
-                        LatestExceedanceFraction: latestEf,
-                        ExceedanceFractionHistory: FieldValue.arrayUnion(latestEf as any),
-                        EFComputedAt: nowTs,
                         updatedAt: nowTs,
                         updatedBy: uid,
+                        LatestExceedanceFractionByAgent: agentEfState.latestByAgent,
+                        ExceedanceFractionHistoryByAgent: agentEfState.historyByAgent,
                     };
+                    if (topSnapshot && (topChanged || !data?.LatestExceedanceFraction)) {
+                        payload.LatestExceedanceFraction = topSnapshot;
+                        payload.ExceedanceFractionHistory = FieldValue.arrayUnion(topSnapshot as any);
+                        payload.EFComputedAt = nowTs;
+                    }
+                    if (!payload.ExceedanceFractionHistory && data?.ExceedanceFractionHistory) {
+                        payload.ExceedanceFractionHistory = data.ExceedanceFractionHistory;
+                    }
                     if (!snap.exists) {
                         payload.createdAt = nowTs;
                         payload.createdBy = uid;
                     }
                     tx.set(parentRef, payload, { merge: true });
                     // Build summary entry for org-level EfSummary map
-                    const agentVal = (mostRecent && mostRecent.length) ? (mostRecent[0] as any)?.Agent ?? null : null;
-                    const entry = {
+                    const entry = topSnapshot ? {
                         GroupId: groupId,
                         ExposureGroup: g.groupName,
-                        ExceedanceFraction: latestEf.ExceedanceFraction,
+                        ExceedanceFraction: topSnapshot.ExceedanceFraction,
                         PreviousExceedanceFraction: prevEfVal,
-                        Agent: agentVal,
-                        OELNumber: latestEf.OELNumber,
-                        DateCalculated: latestEf.DateCalculated,
-                        SamplesUsedCount: latestEf.MostRecentNumber,
-                    };
+                        Agent: topSnapshot.AgentName ?? null,
+                        AgentKey: topSnapshot.AgentKey ?? null,
+                        OELNumber: topSnapshot.OELNumber,
+                        DateCalculated: topSnapshot.DateCalculated,
+                        SamplesUsedCount: topSnapshot.MostRecentNumber,
+                        ByAgent: byAgentSummary,
+                    } : null;
                     // Return both entry and undo metadata for this group
-                    return { entry, patch: { groupId, replaced, efAdded: latestEf } };
+                    return { entry, patch: { groupId, replaced } };
                 }
             });
             // Stage for a single org doc update after loop
@@ -906,6 +1167,7 @@ function undoImportsAndRespectExisting(
             SampleDate: r?.SampleDate ?? "",
             ExposureGroup: r?.ExposureGroup || r?.Group || data?.Group || data?.ExposureGroup || groupId,
             Agent: r?.Agent ?? "",
+            AgentKey: r?.AgentKey || normalizeAgent(r?.Agent).key,
             TWA: (r?.TWA === '' || r?.TWA === undefined || r?.TWA === null) ? null : Number(r?.TWA),
             Notes: r?.Notes ?? "",
             ImportJobId: r?.ImportJobId ?? null,
@@ -921,34 +1183,59 @@ function undoImportsAndRespectExisting(
     }
 
     const mostRecent = getMostRecentSamples(sorted as any, 6);
-    const TWAlist = mostRecent.map(r => Number(r.TWA)).filter(n => n > 0);
-    const efVal = (TWAlist.length >= 2) ? calculateExceedanceProbability(TWAlist, 0.05) : 0;
-    const latestEf = createExceedanceFraction(efVal, mostRecent as any, TWAlist);
+    const agentEfState = computeAgentEfState(sorted as any, data?.LatestExceedanceFractionByAgent, data?.ExceedanceFractionHistoryByAgent);
+    let topSnapshot = agentEfState.topSnapshot;
+    if (!topSnapshot) {
+        const fallbackTwa = mostRecent.map(r => Number(r.TWA)).filter(n => n > 0);
+        const fallback = createExceedanceFraction((fallbackTwa.length >= 2) ? calculateExceedanceProbability(fallbackTwa, 0.05) : 0, mostRecent as any, fallbackTwa, { key: 'unknown', name: 'Unknown' }) as AgentEfSnapshot;
+        fallback.AgentKey = fallback.AgentKey || 'unknown';
+        fallback.AgentName = fallback.AgentName || 'Unknown';
+        topSnapshot = fallback;
+    }
+    const prevTopCompact = compactEfSnapshot(data?.LatestExceedanceFraction);
+    const newTopCompact = compactEfSnapshot(topSnapshot);
+    const topChanged = !deepEqual(prevTopCompact, newTopCompact);
+    const byAgentSummary = Object.fromEntries(Object.entries(agentEfState.latestByAgent).map(([key, snap]) => [key, {
+        Agent: snap.AgentName,
+        AgentKey: snap.AgentKey,
+        ExceedanceFraction: snap.ExceedanceFraction,
+        DateCalculated: snap.DateCalculated,
+        SamplesUsedCount: snap.MostRecentNumber,
+    }]));
     const nowTs = Timestamp.now();
 
     const payload: any = {
         Results: sorted,
         ResultsPreview: mostRecent,
         ResultsTotalCount: sorted.length,
-        LatestExceedanceFraction: latestEf,
-        ExceedanceFractionHistory: FieldValue.arrayUnion(latestEf as any),
-        // Mark EF as precomputed in this write so the parent-doc trigger skips a second recompute
-        EFComputedAt: nowTs,
+        LatestExceedanceFractionByAgent: agentEfState.latestByAgent,
+        ExceedanceFractionHistoryByAgent: agentEfState.historyByAgent,
         updatedAt: nowTs,
         updatedBy: uid,
     };
+    if (topSnapshot && (topChanged || !data?.LatestExceedanceFraction)) {
+        payload.LatestExceedanceFraction = topSnapshot;
+        payload.ExceedanceFractionHistory = FieldValue.arrayUnion(topSnapshot as any);
+        payload.EFComputedAt = nowTs;
+    }
     tx.set(parentRef, payload, { merge: true });
-    const agentVal = (mostRecent && mostRecent.length) ? (mostRecent[0] as any)?.Agent ?? null : null;
-    orgSummaryUpdate[`EfSummary.${groupId}`] = {
+    const summaryEntry = topSnapshot ? {
         GroupId: groupId,
         ExposureGroup: data.ExposureGroup || data.Group || groupId,
-        ExceedanceFraction: latestEf.ExceedanceFraction,
-        PreviousExceedanceFraction: null,
-        Agent: agentVal,
-        OELNumber: latestEf.OELNumber,
-        DateCalculated: latestEf.DateCalculated,
-        SamplesUsedCount: latestEf.MostRecentNumber,
-    };
+        ExceedanceFraction: topSnapshot.ExceedanceFraction,
+        PreviousExceedanceFraction: prevTopCompact?.ExceedanceFraction ?? null,
+        Agent: topSnapshot.AgentName ?? null,
+        AgentKey: topSnapshot.AgentKey ?? null,
+        OELNumber: topSnapshot.OELNumber,
+        DateCalculated: topSnapshot.DateCalculated,
+        SamplesUsedCount: topSnapshot.MostRecentNumber,
+        ByAgent: byAgentSummary,
+    } : null;
+    if (summaryEntry) {
+        orgSummaryUpdate[`EfSummary.${groupId}`] = summaryEntry;
+    } else {
+        orgSummaryUpdate[`EfSummary.${groupId}`] = FieldValue.delete();
+    }
 
     return { removedCount, restoredCount, emptied: false };
 }
