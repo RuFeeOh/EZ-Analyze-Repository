@@ -3,7 +3,7 @@ import { Firestore, collection, collectionData, CollectionReference, doc, setDoc
 import { serverTimestamp } from 'firebase/firestore';
 import { Auth } from '@angular/fire/auth';
 import { Agent } from '../../models/agent.model';
-import { Observable, shareReplay, switchMap } from 'rxjs';
+import { filter, Observable, of, shareReplay, switchMap } from 'rxjs';
 import { createInjectionContext } from '../../utils/create-injection-context.decorator';
 import { OrganizationService } from '../organization/organization.service';
 import { OrganizationStore } from '../organization/organization.store';
@@ -18,6 +18,7 @@ export class AgentService {
      * Observable to shareReplay of agents list
      */
     agents$: Observable<Agent[]> = this.organizationStore.currentOrg$.pipe(
+        filter(org => !!org),
         switchMap(org => this.list(org?.Uid || '')),
         shareReplay({ bufferSize: 1, refCount: true })
     );
@@ -28,6 +29,10 @@ export class AgentService {
 
     @createInjectionContext()
     list(orgId: string): Observable<Agent[]> {
+        if (!orgId) {
+            // Avoid creating invalid Firestore paths when organization is not yet resolved
+            return of([]);
+        }
         return collectionData(this.agentsRef(orgId) as any, { idField: 'Uid' }) as any;
     }
 
