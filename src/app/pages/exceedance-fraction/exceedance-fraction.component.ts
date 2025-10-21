@@ -3,7 +3,7 @@ import { FormsModule } from '@angular/forms';
 import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
 import { Firestore } from '@angular/fire/firestore';
-import { collection, query, where, orderBy, doc, getDoc, writeBatch } from 'firebase/firestore';
+import { collection, query, orderBy, doc, getDoc } from 'firebase/firestore';
 import { collectionData } from '@angular/fire/firestore';
 import { Functions, httpsCallable } from '@angular/fire/functions';
 import { OrganizationService } from '../../services/organization/organization.service';
@@ -422,30 +422,45 @@ export class ExceedanceFractionComponent {
     if (!orgId) return;
     const selectedRows = this.selection.selected || [];
     if (!selectedRows.length) return;
-    const docIds = new Set<string>();
+    const removalMap = new Map<string, Map<string, string>>();
     for (const row of selectedRows) {
-      const docId = row?.DocUid || row?.Uid;
-      if (docId) docIds.add(String(docId));
+      const docIdRaw = row?.DocUid || row?.Uid || '';
+      const docId = String(docIdRaw || '').trim();
+      if (!docId) continue;
+      const agentNameRaw = String(row?.Agent ?? '').trim();
+      const agentKeyRaw = String(row?.AgentKey ?? '').trim();
+      const agentKey = agentKeyRaw || this.slugifyAgent(agentNameRaw);
+      if (!agentKey) continue;
+      if (!removalMap.has(docId)) {
+        removalMap.set(docId, new Map<string, string>());
+      }
+      removalMap.get(docId)!.set(agentKey, agentNameRaw || agentKey);
     }
-    if (!docIds.size) return;
-    const ok = window.confirm(`Delete ${docIds.size} exposure group(s)? This cannot be undone.`);
-    if (!ok) return;
+    if (!removalMap.size) return;
+    const totalAgents = Array.from(removalMap.values()).reduce((sum, agents) => sum + agents.size, 0);
+    if (totalAgents === 0) return;
+    const confirmMessage = totalAgents === 1
+      ? 'Delete this agent from its exposure group? This cannot be undone.'
+      : `Delete ${totalAgents} agent record(s) across ${removalMap.size} exposure group(s)? This cannot be undone.`;
+    if (!window.confirm(confirmMessage)) return;
     let taskId: string | null = null;
     try {
       this.deleting.set(true);
-      taskId = this.bg.startTask({ label: 'Deleting exposure groups', detail: `${docIds.size} group(s)`, kind: 'other', indeterminate: true });
-      const batch = writeBatch(this.firestore as any);
-      for (const docId of docIds) {
-        const ref = doc(this.firestore as any, `organizations/${orgId}/exposureGroups/${docId}`);
-        batch.delete(ref);
+      taskId = this.bg.startTask({ label: 'Removing agent data', detail: `${totalAgents} agent(s) • ${removalMap.size} group(s)`, kind: 'other', indeterminate: true });
+      const removals: { groupId: string; agentKey: string; agentName?: string }[] = [];
+      for (const [groupId, agents] of removalMap.entries()) {
+        for (const [agentKey, agentName] of agents.entries()) {
+          removals.push({ groupId, agentKey, agentName });
+        }
       }
-      await batch.commit();
+      const callable = httpsCallable<{ orgId: string; removals: { groupId: string; agentKey: string; agentName?: string }[] }, any>(this.fns, 'removeAgentsFromExposureGroups');
+      await callable({ orgId, removals });
       this.selection.clear();
-      try { if (taskId) this.bg.completeTask(taskId, `Deleted ${docIds.size} group(s)`); } catch { }
+      try { if (taskId) this.bg.completeTask(taskId, `Removed ${totalAgents} agent(s)`); } catch { }
     } catch (e) {
-      console.error('Bulk delete failed', e);
-      try { if (taskId) this.bg.failTask(taskId, 'Delete failed'); } catch { }
-      alert('Bulk delete failed; see console for details.');
+      console.error('Agent removal failed', e);
+      try { if (taskId) this.bg.failTask(taskId, 'Removal failed'); } catch { }
+      alert('Agent removal failed; see console for details.');
     }
     finally {
       this.deleting.set(false);
@@ -465,6 +480,10 @@ export class ExceedanceFractionComponent {
         queryParamsHandling: 'merge'
       });
     } catch { /* ignore navigation errors */ }
+  }
+
+  private slugifyAgent(value: string): string {
+    return (value || '').toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '').slice(0, 120) || 'unknown';
   }
 
 }

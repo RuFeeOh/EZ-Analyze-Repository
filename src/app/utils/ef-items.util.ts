@@ -28,6 +28,7 @@ export interface ExceedanceFractionItem {
     DocUid?: string; // Firestore document id for the exposure group
     ExposureGroup: string;
     Agent: string;
+    AgentKey: string;
     OELNumber: number | null;
     ExceedanceFraction: number;
     EfBucket: EfBucket;
@@ -83,6 +84,10 @@ function firstAgent(results: any[]): string {
     return found?.AgentName ?? found?.Agent ?? '';
 }
 
+function slugifyAgentName(value: string): string {
+    return (value || '').toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '').slice(0, 120) || 'unknown';
+}
+
 function snapshotAgentName(snapshot: any): string {
     if (!snapshot || typeof snapshot !== 'object') return '';
     if (snapshot.AgentName) return snapshot.AgentName;
@@ -125,11 +130,13 @@ export function buildHistoryEfItems(groups: ExposureGroupRaw[] | undefined | nul
                     const delta = prevVal != null ? (currVal - prevVal) : 0;
                     const results = Array.isArray(ef?.ResultsUsed) ? ef.ResultsUsed : [];
                     const agentName = snapshotAgentName(ef) || snapshotAgentName({ ResultsUsed: results }) || agentKey || '';
+                    const key = ef?.AgentKey || slugifyAgentName(agentKey || agentName);
                     items.push({
                         Uid: `${docUid || name}__${agentKey}__${ef?.DateCalculated || 'no-date'}__${idx}`,
                         DocUid: docUid,
                         ExposureGroup: name,
                         Agent: agentName,
+                        AgentKey: key,
                         OELNumber: ef?.OELNumber ?? g?.LatestExceedanceFraction?.OELNumber ?? null,
                         ExceedanceFraction: currVal,
                         EfBucket: bucketFor(currVal),
@@ -158,11 +165,14 @@ export function buildHistoryEfItems(groups: ExposureGroupRaw[] | undefined | nul
             }
             const delta = prevVal != null ? (currVal - prevVal) : 0;
             const results = ef?.ResultsUsed ?? [];
+            const agentName = firstAgent(results);
+            const agentKey = (ef as any)?.AgentKey || slugifyAgentName(agentName || name);
             items.push({
                 Uid: `${name}__${ef?.DateCalculated || 'no-date'}__${idx}`,
                 DocUid: docUid,
                 ExposureGroup: name,
                 Agent: firstAgent(results),
+                AgentKey: agentKey,
                 OELNumber: ef?.OELNumber ?? g?.LatestExceedanceFraction?.OELNumber ?? null,
                 ExceedanceFraction: currVal,
                 EfBucket: bucketFor(currVal),
@@ -209,11 +219,13 @@ export function buildLatestEfItems(groups: ExposureGroupRaw[] | undefined | null
                 const delta = prevVal != null ? currVal - prevVal : 0;
                 const results = Array.isArray(snapshot?.ResultsUsed) ? snapshot.ResultsUsed : [];
                 const agentName = snapshotAgentName(snapshot) || agentKey || '';
+                const key = snapshot?.AgentKey || slugifyAgentName(agentKey || agentName);
                 items.push({
                     Uid: `${name}__${agentKey}__latest__${snapshot?.DateCalculated || 'no-date'}`,
                     DocUid: docUid,
                     ExposureGroup: name,
                     Agent: agentName,
+                    AgentKey: key,
                     OELNumber: snapshot?.OELNumber ?? g?.LatestExceedanceFraction?.OELNumber ?? null,
                     ExceedanceFraction: currVal,
                     EfBucket: bucketFor(currVal),
@@ -245,11 +257,14 @@ export function buildLatestEfItems(groups: ExposureGroupRaw[] | undefined | null
         }
         const resultsLegacy = latest?.ResultsUsed ?? [];
         const prevEntry = desc.length >= 2 ? desc[1] : undefined;
+        const legacyAgentName = firstAgent(resultsLegacy);
+        const legacyAgentKey = (latest as any)?.AgentKey || slugifyAgentName(legacyAgentName || name);
         items.push({
             Uid: `${name}__latest__${latest?.DateCalculated || 'no-date'}`,
             DocUid: docUid,
             ExposureGroup: name,
-            Agent: firstAgent(resultsLegacy),
+            Agent: legacyAgentName,
+            AgentKey: legacyAgentKey,
             OELNumber: latest?.OELNumber ?? g?.LatestExceedanceFraction?.OELNumber ?? null,
             ExceedanceFraction: latest?.ExceedanceFraction ?? 0,
             EfBucket: bucketFor(latest?.ExceedanceFraction ?? 0),

@@ -78,6 +78,28 @@ function normalizeAgent(raw: string | null | undefined): AgentNormalization {
     return { key: slugifyAgent(value), name: value };
 }
 
+function normalizeSampleNumber(value: any): string | null {
+    if (value === undefined || value === null) return null;
+    const str = String(value).trim();
+    return str ? str : null;
+}
+
+function resolveAgentKeyFromResult(result: any): string {
+    const keyRaw = typeof result?.AgentKey === 'string' ? result.AgentKey.trim() : '';
+    if (keyRaw) return slugifyAgent(keyRaw);
+    return normalizeAgent(result?.Agent).key;
+}
+
+function getRowKeyVariants(result: any): { sample: string | null; compound: string | null; agentKey: string } {
+    const sample = normalizeSampleNumber(result?.SampleNumber);
+    const agentKey = resolveAgentKeyFromResult(result);
+    return {
+        sample,
+        agentKey,
+        compound: sample ? `${sample}::${agentKey}` : null,
+    };
+}
+
 function compactResults(results: SampleInfo[] | undefined): any[] {
     if (!Array.isArray(results)) return [];
     return results.map(r => ({
@@ -775,12 +797,11 @@ export const bulkImportResults = onCall({ timeoutSeconds: 540, memory: '1GiB' },
                 const toKeySignatureMap = (arr: any[]) => {
                     const m = new Map<string, { twa: number | null; agentKey: string }>();
                     for (const r of (arr || [])) {
-                        const snRaw = (r?.SampleNumber === undefined || r?.SampleNumber === null || r?.SampleNumber === '') ? null : String(r.SampleNumber).trim();
-                        if (snRaw == null) continue;
-                        const agentKey = r?.AgentKey || normalizeAgent(r?.Agent).key;
+                        const { compound, agentKey } = getRowKeyVariants(r);
+                        if (!compound) continue;
                         const twaRaw = (r?.TWA === '' || r?.TWA === undefined || r?.TWA === null) ? null : Number(r.TWA);
                         const twaVal = (twaRaw === null || Number.isNaN(twaRaw)) ? null : twaRaw;
-                        m.set(snRaw, { twa: twaVal, agentKey });
+                        m.set(compound, { twa: twaVal, agentKey });
                     }
                     return m;
                 };
@@ -826,9 +847,8 @@ export const bulkImportResults = onCall({ timeoutSeconds: 540, memory: '1GiB' },
                 const collectNoKeyAgents = (arr: any[]) => {
                     const set = new Set<string>();
                     for (const r of (arr || [])) {
-                        const snRaw = (r?.SampleNumber === undefined || r?.SampleNumber === null || r?.SampleNumber === '') ? null : String(r.SampleNumber).trim();
-                        if (snRaw !== null) continue;
-                        const agentKey = r?.AgentKey || normalizeAgent(r?.Agent).key;
+                        const { sample, agentKey } = getRowKeyVariants(r);
+                        if (sample !== null) continue;
                         if (agentKey) set.add(agentKey);
                     }
                     return set;
@@ -839,37 +859,41 @@ export const bulkImportResults = onCall({ timeoutSeconds: 540, memory: '1GiB' },
                 for (const agentKey of noKeyExistingAgents) changedAgents.add(agentKey);
 
                 // Build map keyed by SampleNumber for replacement, and collect no-key entries separately
-                const bySampleNumber = new Map<string, any>();
+                const byCompoundKey = new Map<string, any>();
                 const noKey: any[] = [];
                 const replaced: Record<string, any> = {};
 
                 for (const r of existingNorm) {
-                    const sn = r.SampleNumber;
-                    if (sn === null || sn === undefined) {
+                    const keyInfo = getRowKeyVariants(r);
+                    if (!keyInfo.compound) {
                         noKey.push(r);
                     } else {
-                        bySampleNumber.set(String(sn).trim(), r);
+                        byCompoundKey.set(keyInfo.compound, r);
                     }
                 }
 
                 for (const r of incomingNorm) {
-                    const sn = r.SampleNumber;
-                    if (sn === null || sn === undefined) {
+                    const keyInfo = getRowKeyVariants(r);
+                    if (!keyInfo.compound) {
                         // No key available; append as a distinct row
                         noKey.push(r);
                     } else {
                         // Replace or add
-                        const key = String(sn).trim();
-                        const prev = bySampleNumber.get(key);
+                        const key = keyInfo.compound;
+                        const prev = byCompoundKey.get(key);
                         if (prev) {
                             // Track previous row so we can restore on undo
                             replaced[key] = prev;
+                            const prevKeyInfo = getRowKeyVariants(prev);
+                            if (prevKeyInfo.sample && !replaced[prevKeyInfo.sample]) {
+                                replaced[prevKeyInfo.sample] = prev;
+                            }
                         }
-                        bySampleNumber.set(key, r);
+                        byCompoundKey.set(key, r);
                     }
                 }
 
-                const mergedUnique = [...bySampleNumber.values(), ...noKey];
+                const mergedUnique = [...byCompoundKey.values(), ...noKey];
                 const sorted = mergedUnique.sort((a, b) => parseDateToEpoch(b.SampleDate) - parseDateToEpoch(a.SampleDate));
                 const limited = sorted.slice(0, 30);
                 // Prepare preview regardless; EF may be reused if inputs are unchanged
@@ -1122,6 +1146,144 @@ export const undoImport = onCall({ timeoutSeconds: 540, memory: '1GiB' }, async 
     return { ok: failures === 0, failures, revertedGroups: groupIds.length };
 });
 
+export const removeAgentsFromExposureGroups = onCall(async (request) => {
+    const { orgId, removals } = request.data || {};
+    const uid = request.auth?.uid || 'system';
+    if (!orgId || typeof orgId !== 'string') {
+        throw new HttpsError('invalid-argument', 'orgId required');
+    }
+    if (!Array.isArray(removals) || removals.length === 0) {
+        throw new HttpsError('invalid-argument', 'removals[] required');
+    }
+    const normalizedRemovals = new Map<string, Set<string>>();
+    for (const entry of removals as any[]) {
+        const rawGroupId = typeof entry?.groupId === 'string' ? entry.groupId.trim() : '';
+        const rawKey = typeof entry?.agentKey === 'string' ? entry.agentKey.trim() : '';
+        if (!rawGroupId || !rawKey) continue;
+        const groupId = rawGroupId;
+        const agentKey = slugifyAgent(rawKey);
+        if (!normalizedRemovals.has(groupId)) normalizedRemovals.set(groupId, new Set<string>());
+        normalizedRemovals.get(groupId)!.add(agentKey);
+    }
+    if (!normalizedRemovals.size) {
+        throw new HttpsError('invalid-argument', 'No valid removals provided');
+    }
+    const db = getFirestore();
+    const orgSummaryUpdate: Record<string, any> = {};
+    let removedAgentsTotal = 0;
+    for (const [groupId, agentKeys] of normalizedRemovals.entries()) {
+        const parentRef = db.doc(`organizations/${orgId}/exposureGroups/${groupId}`);
+        const outcome = await db.runTransaction(async (tx: any) => {
+            const snap = await tx.get(parentRef);
+            if (!snap.exists) {
+                return { status: 'missing' };
+            }
+            const data = (snap.data() || {}) as any;
+            const removalSet = new Set<string>(Array.from(agentKeys).map(slugifyAgent));
+            const existingResults: any[] = Array.isArray(data.Results) ? data.Results as any[] : [];
+            const normalized = existingResults.map(r => ({
+                Location: r?.Location ?? "",
+                SampleNumber: (r?.SampleNumber === undefined || r?.SampleNumber === '') ? null : r?.SampleNumber,
+                SampleDate: r?.SampleDate ?? "",
+                ExposureGroup: r?.ExposureGroup || r?.Group || data?.ExposureGroup || data?.Group || groupId,
+                Agent: typeof r?.Agent === 'string' ? r.Agent.trim() : '',
+                AgentKey: r?.AgentKey || normalizeAgent(r?.Agent).key,
+                TWA: (r?.TWA === '' || r?.TWA === undefined || r?.TWA === null) ? null : Number(r?.TWA),
+                Notes: r?.Notes ?? "",
+                ImportJobId: r?.ImportJobId ?? null,
+            })) as SampleInfo[];
+            const filtered = normalized.filter(r => {
+                const key = r?.AgentKey || normalizeAgent(r?.Agent).key;
+                if (!key) return true;
+                return !removalSet.has(slugifyAgent(key));
+            });
+            if (!filtered.length) {
+                tx.delete(parentRef);
+                return { status: 'deleted', summary: FieldValue.delete() };
+            }
+            const sorted = [...filtered].sort((a, b) => parseDateToEpoch(b.SampleDate) - parseDateToEpoch(a.SampleDate));
+            const limited = sorted.slice(0, 30);
+            const recomputeState = computeAgentEfState(limited as any, data?.LatestExceedanceFractionByAgent, data?.ExceedanceFractionHistoryByAgent);
+            let topSnapshot = recomputeState.topSnapshot;
+            if (!topSnapshot) {
+                const fallbackMostRecent = getMostRecentSamples(sorted as any, 6);
+                const fallbackTwa = fallbackMostRecent.map(r => Number(r.TWA)).filter(n => n > 0);
+                const fallback = createExceedanceFraction((fallbackTwa.length >= 2) ? calculateExceedanceProbability(fallbackTwa, 0.05) : 0, fallbackMostRecent as any, fallbackTwa, { key: 'unknown', name: 'Unknown' }) as AgentEfSnapshot;
+                fallback.AgentKey = fallback.AgentKey || 'unknown';
+                fallback.AgentName = fallback.AgentName || 'Unknown';
+                topSnapshot = fallback;
+            }
+            const prevTopCompact = compactEfSnapshot(data?.LatestExceedanceFraction);
+            const newTopCompact = compactEfSnapshot(topSnapshot);
+            const topChanged = !deepEqual(prevTopCompact, newTopCompact);
+            const byAgentSummary = Object.fromEntries(Object.entries(recomputeState.latestByAgent).map(([key, snap]) => [key, {
+                Agent: snap.AgentName,
+                AgentKey: snap.AgentKey,
+                ExceedanceFraction: snap.ExceedanceFraction,
+                DateCalculated: snap.DateCalculated,
+                SamplesUsedCount: snap.MostRecentNumber,
+            }]));
+            const nowTs = Timestamp.now();
+            const latestByAgentPayload: Record<string, any> = {};
+            for (const [key, snapshot] of Object.entries(recomputeState.latestByAgent)) {
+                latestByAgentPayload[key] = snapshot;
+            }
+            const historyByAgentPayload: Record<string, any> = {};
+            for (const [key, history] of Object.entries(recomputeState.historyByAgent)) {
+                historyByAgentPayload[key] = history;
+            }
+            for (const removedKey of recomputeState.removedAgentKeys) {
+                latestByAgentPayload[removedKey] = FieldValue.delete();
+                historyByAgentPayload[removedKey] = FieldValue.delete();
+            }
+
+            const payload: any = {
+                Results: limited,
+                ResultsPreview: getMostRecentSamples(limited as any, 6),
+                ResultsTotalCount: limited.length,
+                LatestExceedanceFractionByAgent: latestByAgentPayload,
+                ExceedanceFractionHistoryByAgent: historyByAgentPayload,
+                updatedAt: nowTs,
+                updatedBy: uid,
+            };
+            if (topSnapshot) {
+                payload.LatestExceedanceFraction = topSnapshot;
+                if (topChanged || !data?.LatestExceedanceFraction) {
+                    payload.ExceedanceFractionHistory = FieldValue.arrayUnion(topSnapshot as any);
+                    payload.EFComputedAt = nowTs;
+                }
+            }
+            tx.set(parentRef, payload, { merge: true });
+            const summaryEntry = topSnapshot ? {
+                GroupId: groupId,
+                ExposureGroup: data?.ExposureGroup || data?.Group || groupId,
+                ExceedanceFraction: topSnapshot.ExceedanceFraction,
+                PreviousExceedanceFraction: prevTopCompact?.ExceedanceFraction ?? null,
+                Agent: topSnapshot.AgentName ?? null,
+                AgentKey: topSnapshot.AgentKey ?? null,
+                OELNumber: topSnapshot.OELNumber,
+                DateCalculated: topSnapshot.DateCalculated,
+                SamplesUsedCount: topSnapshot.MostRecentNumber,
+                ByAgent: byAgentSummary,
+            } : FieldValue.delete();
+            return { status: 'updated', summary: summaryEntry };
+        });
+        if (outcome.status === 'deleted') {
+            orgSummaryUpdate[`EfSummary.${groupId}`] = FieldValue.delete();
+        } else if (outcome.status === 'updated' && outcome.summary) {
+            orgSummaryUpdate[`EfSummary.${groupId}`] = outcome.summary;
+        }
+        if (outcome.status !== 'missing') {
+            removedAgentsTotal += agentKeys.size;
+        }
+    }
+    if (Object.keys(orgSummaryUpdate).length > 0) {
+        const orgRef = db.doc(`organizations/${orgId}`);
+        await orgRef.set(orgSummaryUpdate as any, { merge: true });
+    }
+    return { ok: true, groups: normalizedRemovals.size, removedAgents: removedAgentsTotal };
+});
+
 
 async function checkGroupIfItShouldBeUpdated(db: admin.firestore.Firestore, orgId: any, groupId: string, undo: any, jobId: any, uid: string, orgSummaryUpdate: Record<string, any>): Promise<{ removedCount: number, restoredCount: number, emptied: boolean }> {
     const parentRef = db.doc(`organizations/${orgId}/exposureGroups/${groupId}`);
@@ -1151,13 +1313,25 @@ function undoImportsAndRespectExisting(
     const keep: any[] = [];
     const seenKeys = new Set<string>();
     let removedCount = 0;
-    findExistingResults(eGResults, (result: any) => {
-        return (result?.SampleNumber === undefined || result?.SampleNumber === null || result?.SampleNumber === '') ? null : String(result.SampleNumber).trim();
-    }, jobId, replacedMap, keep, seenKeys, (dropped: boolean) => { if (dropped) removedCount += 1; });
+    findExistingResults(eGResults, (result: any) => getRowKeyVariants(result), jobId, replacedMap, keep, seenKeys, (dropped: boolean) => { if (dropped) removedCount += 1; });
     // Restore replaced rows
     let restoredCount = 0;
+    const restoredCanonical = new Set<string>();
     for (const [k, prev] of Object.entries(replacedMap)) {
-        if (!seenKeys.has(k)) { keep.push(prev); restoredCount += 1; }
+        const { sample, compound } = getRowKeyVariants(prev);
+        const keyVariants = [compound, sample, k].filter((v): v is string => typeof v === 'string' && v.length > 0);
+        const canonical = compound || sample || k;
+        const alreadyKept = keyVariants.some(key => seenKeys.has(key));
+        if (alreadyKept || (canonical && restoredCanonical.has(canonical))) {
+            if (canonical) restoredCanonical.add(canonical);
+            continue;
+        }
+        keep.push(prev);
+        restoredCount += 1;
+        if (canonical) restoredCanonical.add(canonical);
+        for (const key of keyVariants) {
+            seenKeys.add(key);
+        }
     }
     // Sort and limit
     const sorted = keep
@@ -1242,7 +1416,7 @@ function undoImportsAndRespectExisting(
 
 function findExistingResults(
     eGResults: any[],
-    getSampleNumberAsString: (result: any) => string | null,
+    getKeyVariants: (result: any) => { sample: string | null; compound: string | null; agentKey: string },
     jobId: any,
     replacedMap: Record<string, any>,
     keep: any[],
@@ -1250,19 +1424,21 @@ function findExistingResults(
     onDrop?: (dropped: boolean) => void,
 ) {
     for (const result of eGResults) {
-        const key = getSampleNumberAsString(result);
+        const { sample, compound } = getKeyVariants(result);
+        const keyCandidates = [compound, sample].filter((v): v is string => typeof v === 'string' && v.length > 0);
         const isFromJob = result?.ImportJobId === jobId;
         if (isFromJob) {
-            // drop it
             if (onDrop) onDrop(true);
             continue;
         }
-        if (key && replacedMap[key]) {
-            // Will let restored version replace it after loop
+        const shouldSkip = keyCandidates.some(key => replacedMap[key]);
+        if (shouldSkip) {
             continue;
         }
         keep.push(result);
-        if (key) seenKeys.add(key);
+        for (const key of keyCandidates) {
+            seenKeys.add(key);
+        }
         if (onDrop) onDrop(false);
     }
 }
