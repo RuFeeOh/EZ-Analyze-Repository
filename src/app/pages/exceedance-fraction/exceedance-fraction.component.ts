@@ -444,25 +444,83 @@ export class ExceedanceFractionComponent {
       : `Delete ${totalAgents} agent record(s) across ${removalMap.size} exposure group(s)? This cannot be undone.`;
     if (!window.confirm(confirmMessage)) return;
     let taskId: string | null = null;
+    let unsub: (() => void) | null = null;
+    let completedViaSnapshot = false;
     try {
       this.deleting.set(true);
-      taskId = this.bg.startTask({ label: 'Removing agent data', detail: `${totalAgents} agent(s) • ${removalMap.size} group(s)`, kind: 'other', indeterminate: true });
+      const totalGroups = removalMap.size;
+      const jobId = `agentRemoval-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      taskId = this.bg.startTask({ label: 'Removing agent data', detail: `Preparing to remove ${totalAgents} agent(s)`, kind: 'other', total: totalAgents });
+      try {
+        const jobDoc = doc(this.firestore as any, `organizations/${orgId}/agentRemovalJobs/${jobId}`);
+        const { onSnapshot } = await import('firebase/firestore');
+        unsub = onSnapshot(jobDoc as any, (snap: any) => {
+          const data = (snap?.data?.() || {}) as any;
+          const removed = Number(data.agentsRemoved || 0);
+          const processed = Number(data.groupsProcessed || 0);
+          const total = Number(data.totalAgents || totalAgents);
+          const groupTotal = Number(data.totalGroups || totalGroups);
+          const failures = Number(data.failures || 0);
+          const status = data.status || 'running';
+          const detailParts = [`Removed ${removed}/${total} agent(s)`, `${processed}/${groupTotal} group(s)`];
+          if (failures > 0) detailParts.push(`${failures} error(s)`);
+          this.bg.updateTask(taskId!, {
+            done: Math.min(removed, total),
+            total,
+            detail: detailParts.join(' • '),
+          });
+          if (status === 'completed' || status === 'completed-with-errors' || status === 'failed') {
+            try { unsub?.(); } catch { /* ignore */ }
+            unsub = null;
+            const message = status === 'completed'
+              ? `Removed ${removed} agent(s) across ${processed} group(s)`
+              : status === 'completed-with-errors'
+                ? `Removal finished with errors. Removed ${removed} agent(s)`
+                : 'Removal failed';
+            if (status === 'failed') {
+              this.bg.failTask(taskId!, message);
+            } else {
+              this.bg.completeTask(taskId!, message);
+            }
+            completedViaSnapshot = true;
+          }
+        }, (error: any) => {
+          console.warn('Agent removal progress listener failed', error);
+        });
+      } catch (err) {
+        console.warn('Failed to attach removal progress listener', err);
+        if (taskId) {
+          this.bg.updateTask(taskId, { indeterminate: true, detail: `${totalAgents} agent(s) • ${removalMap.size} group(s)` });
+        }
+      }
       const removals: { groupId: string; agentKey: string; agentName?: string }[] = [];
       for (const [groupId, agents] of removalMap.entries()) {
         for (const [agentKey, agentName] of agents.entries()) {
           removals.push({ groupId, agentKey, agentName });
         }
       }
-      const callable = httpsCallable<{ orgId: string; removals: { groupId: string; agentKey: string; agentName?: string }[] }, any>(this.fns, 'removeAgentsFromExposureGroups');
-      await callable({ orgId, removals });
+      const callable = httpsCallable<{ orgId: string; removals: { groupId: string; agentKey: string; agentName?: string }[]; trackJob?: boolean; jobId?: string; totalAgents?: number; totalGroups?: number }, any>(this.fns, 'removeAgentsFromExposureGroups');
+      await callable({ orgId, removals, trackJob: true, jobId, totalAgents, totalGroups });
       this.selection.clear();
-      try { if (taskId) this.bg.completeTask(taskId, `Removed ${totalAgents} agent(s)`); } catch { }
+      if (taskId && !completedViaSnapshot) {
+        this.bg.completeTask(taskId, `Removed ${totalAgents} agent(s)`);
+        completedViaSnapshot = true;
+      }
     } catch (e) {
       console.error('Agent removal failed', e);
-      try { if (taskId) this.bg.failTask(taskId, 'Removal failed'); } catch { }
+      try {
+        if (taskId && !completedViaSnapshot) {
+          this.bg.failTask(taskId, 'Removal failed');
+          completedViaSnapshot = true;
+        }
+      } catch { }
       alert('Agent removal failed; see console for details.');
     }
     finally {
+      if (unsub) {
+        try { unsub(); } catch { /* ignore */ }
+        unsub = null;
+      }
       this.deleting.set(false);
     }
   }

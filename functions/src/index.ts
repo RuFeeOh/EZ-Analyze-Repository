@@ -1147,7 +1147,7 @@ export const undoImport = onCall({ timeoutSeconds: 540, memory: '1GiB' }, async 
 });
 
 export const removeAgentsFromExposureGroups = onCall(async (request) => {
-    const { orgId, removals } = request.data || {};
+    const { orgId, removals, trackJob, jobId: providedJobId, totalAgents: totalAgentsProvided, totalGroups: totalGroupsProvided } = request.data || {};
     const uid = request.auth?.uid || 'system';
     if (!orgId || typeof orgId !== 'string') {
         throw new HttpsError('invalid-argument', 'orgId required');
@@ -1169,119 +1169,201 @@ export const removeAgentsFromExposureGroups = onCall(async (request) => {
         throw new HttpsError('invalid-argument', 'No valid removals provided');
     }
     const db = getFirestore();
-    const orgSummaryUpdate: Record<string, any> = {};
-    let removedAgentsTotal = 0;
-    for (const [groupId, agentKeys] of normalizedRemovals.entries()) {
-        const parentRef = db.doc(`organizations/${orgId}/exposureGroups/${groupId}`);
-        const outcome = await db.runTransaction(async (tx: any) => {
-            const snap = await tx.get(parentRef);
-            if (!snap.exists) {
-                return { status: 'missing' };
-            }
-            const data = (snap.data() || {}) as any;
-            const removalSet = new Set<string>(Array.from(agentKeys).map(slugifyAgent));
-            const existingResults: any[] = Array.isArray(data.Results) ? data.Results as any[] : [];
-            const normalized = existingResults.map(r => ({
-                Location: r?.Location ?? "",
-                SampleNumber: (r?.SampleNumber === undefined || r?.SampleNumber === '') ? null : r?.SampleNumber,
-                SampleDate: r?.SampleDate ?? "",
-                ExposureGroup: r?.ExposureGroup || r?.Group || data?.ExposureGroup || data?.Group || groupId,
-                Agent: typeof r?.Agent === 'string' ? r.Agent.trim() : '',
-                AgentKey: r?.AgentKey || normalizeAgent(r?.Agent).key,
-                TWA: (r?.TWA === '' || r?.TWA === undefined || r?.TWA === null) ? null : Number(r?.TWA),
-                Notes: r?.Notes ?? "",
-                ImportJobId: r?.ImportJobId ?? null,
-            })) as SampleInfo[];
-            const filtered = normalized.filter(r => {
-                const key = r?.AgentKey || normalizeAgent(r?.Agent).key;
-                if (!key) return true;
-                return !removalSet.has(slugifyAgent(key));
-            });
-            if (!filtered.length) {
-                tx.delete(parentRef);
-                return { status: 'deleted', summary: FieldValue.delete() };
-            }
-            const sorted = [...filtered].sort((a, b) => parseDateToEpoch(b.SampleDate) - parseDateToEpoch(a.SampleDate));
-            const limited = sorted.slice(0, 30);
-            const recomputeState = computeAgentEfState(limited as any, data?.LatestExceedanceFractionByAgent, data?.ExceedanceFractionHistoryByAgent);
-            let topSnapshot = recomputeState.topSnapshot;
-            if (!topSnapshot) {
-                const fallbackMostRecent = getMostRecentSamples(sorted as any, 6);
-                const fallbackTwa = fallbackMostRecent.map(r => Number(r.TWA)).filter(n => n > 0);
-                const fallback = createExceedanceFraction((fallbackTwa.length >= 2) ? calculateExceedanceProbability(fallbackTwa, 0.05) : 0, fallbackMostRecent as any, fallbackTwa, { key: 'unknown', name: 'Unknown' }) as AgentEfSnapshot;
-                fallback.AgentKey = fallback.AgentKey || 'unknown';
-                fallback.AgentName = fallback.AgentName || 'Unknown';
-                topSnapshot = fallback;
-            }
-            const prevTopCompact = compactEfSnapshot(data?.LatestExceedanceFraction);
-            const newTopCompact = compactEfSnapshot(topSnapshot);
-            const topChanged = !deepEqual(prevTopCompact, newTopCompact);
-            const byAgentSummary = Object.fromEntries(Object.entries(recomputeState.latestByAgent).map(([key, snap]) => [key, {
-                Agent: snap.AgentName,
-                AgentKey: snap.AgentKey,
-                ExceedanceFraction: snap.ExceedanceFraction,
-                DateCalculated: snap.DateCalculated,
-                SamplesUsedCount: snap.MostRecentNumber,
-            }]));
-            const nowTs = Timestamp.now();
-            const latestByAgentPayload: Record<string, any> = {};
-            for (const [key, snapshot] of Object.entries(recomputeState.latestByAgent)) {
-                latestByAgentPayload[key] = snapshot;
-            }
-            const historyByAgentPayload: Record<string, any> = {};
-            for (const [key, history] of Object.entries(recomputeState.historyByAgent)) {
-                historyByAgentPayload[key] = history;
-            }
-            for (const removedKey of recomputeState.removedAgentKeys) {
-                latestByAgentPayload[removedKey] = FieldValue.delete();
-                historyByAgentPayload[removedKey] = FieldValue.delete();
-            }
-
-            const payload: any = {
-                Results: limited,
-                ResultsPreview: getMostRecentSamples(limited as any, 6),
-                ResultsTotalCount: limited.length,
-                LatestExceedanceFractionByAgent: latestByAgentPayload,
-                ExceedanceFractionHistoryByAgent: historyByAgentPayload,
-                updatedAt: nowTs,
+    const totalGroupsTarget = typeof totalGroupsProvided === 'number' ? totalGroupsProvided : normalizedRemovals.size;
+    const totalAgentsTarget = typeof totalAgentsProvided === 'number'
+        ? totalAgentsProvided
+        : Array.from(normalizedRemovals.values()).reduce((sum, agents) => sum + agents.size, 0);
+    const shouldTrackJob = !!trackJob;
+    const jobId = shouldTrackJob ? ((): string => {
+        const incoming = typeof providedJobId === 'string' ? providedJobId.trim() : '';
+        if (incoming) return incoming;
+        return `agentRemoval_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    })() : null;
+    const jobRef = shouldTrackJob && jobId ? db.doc(`organizations/${orgId}/agentRemovalJobs/${jobId}`) : null;
+    let jobDocAvailable = !!jobRef;
+    if (jobRef) {
+        try {
+            await jobRef.set({
+                status: 'running',
+                totalGroups: totalGroupsTarget,
+                totalAgents: totalAgentsTarget,
+                groupsProcessed: 0,
+                groupsDeleted: 0,
+                agentsRemoved: 0,
+                failures: 0,
+                startedAt: Timestamp.now(),
+                updatedAt: Timestamp.now(),
                 updatedBy: uid,
-            };
-            if (topSnapshot) {
-                payload.LatestExceedanceFraction = topSnapshot;
-                if (topChanged || !data?.LatestExceedanceFraction) {
-                    payload.ExceedanceFractionHistory = FieldValue.arrayUnion(topSnapshot as any);
-                    payload.EFComputedAt = nowTs;
-                }
-            }
-            tx.set(parentRef, payload, { merge: true });
-            const summaryEntry = topSnapshot ? {
-                GroupId: groupId,
-                ExposureGroup: data?.ExposureGroup || data?.Group || groupId,
-                ExceedanceFraction: topSnapshot.ExceedanceFraction,
-                PreviousExceedanceFraction: prevTopCompact?.ExceedanceFraction ?? null,
-                Agent: topSnapshot.AgentName ?? null,
-                AgentKey: topSnapshot.AgentKey ?? null,
-                OELNumber: topSnapshot.OELNumber,
-                DateCalculated: topSnapshot.DateCalculated,
-                SamplesUsedCount: topSnapshot.MostRecentNumber,
-                ByAgent: byAgentSummary,
-            } : FieldValue.delete();
-            return { status: 'updated', summary: summaryEntry };
-        });
-        if (outcome.status === 'deleted') {
-            orgSummaryUpdate[`EfSummary.${groupId}`] = FieldValue.delete();
-        } else if (outcome.status === 'updated' && outcome.summary) {
-            orgSummaryUpdate[`EfSummary.${groupId}`] = outcome.summary;
-        }
-        if (outcome.status !== 'missing') {
-            removedAgentsTotal += agentKeys.size;
+            }, { merge: true });
+        } catch (e: any) {
+            logger.warn('removeAgentsFromExposureGroups: failed to init job doc', { orgId, jobId, error: e?.message || String(e) });
+            jobDocAvailable = false;
         }
     }
+    const flushProgress = async (delta: { groups?: number; agents?: number; failures?: number; groupsDeleted?: number }) => {
+        if (!jobRef || !jobDocAvailable) return;
+        const payload: any = { updatedAt: Timestamp.now() };
+        if (delta.groups) payload.groupsProcessed = FieldValue.increment(delta.groups);
+        if (delta.agents) payload.agentsRemoved = FieldValue.increment(delta.agents);
+        if (delta.failures) payload.failures = FieldValue.increment(delta.failures);
+        if (delta.groupsDeleted) payload.groupsDeleted = FieldValue.increment(delta.groupsDeleted);
+        try {
+            await jobRef.set(payload, { merge: true });
+        } catch (e: any) {
+            logger.warn('removeAgentsFromExposureGroups: progress update failed', { orgId, jobId, error: e?.message || String(e) });
+            jobDocAvailable = false;
+        }
+    };
+    const orgSummaryUpdate: Record<string, any> = {};
+    let removedAgentsTotal = 0;
+    let groupsDeletedTotal = 0;
+    let failuresTotal = 0;
+    let processedTotal = 0;
+    const queue = Array.from(normalizedRemovals.entries());
+    const workerCount = Math.min(Math.max(1, Number(process.env.REMOVE_AGENTS_CONCURRENCY || 8)), queue.length || 1);
+    const workers = new Array(workerCount).fill(0).map(async () => {
+        while (queue.length) {
+            const next = queue.pop();
+            if (!next) break;
+            const [groupId, agentKeys] = next;
+            const parentRef = db.doc(`organizations/${orgId}/exposureGroups/${groupId}`);
+            try {
+                const outcome = await db.runTransaction(async (tx: any) => {
+                    const snap = await tx.get(parentRef);
+                    if (!snap.exists) {
+                        return { status: 'missing', removedAgentsCount: 0 };
+                    }
+                    const data = (snap.data() || {}) as any;
+                    const removalSet = new Set<string>(Array.from(agentKeys).map(slugifyAgent));
+                    const existingResults: any[] = Array.isArray(data.Results) ? data.Results as any[] : [];
+                    const normalized = existingResults.map(r => ({
+                        Location: r?.Location ?? "",
+                        SampleNumber: (r?.SampleNumber === undefined || r?.SampleNumber === '') ? null : r?.SampleNumber,
+                        SampleDate: r?.SampleDate ?? "",
+                        ExposureGroup: r?.ExposureGroup || r?.Group || data?.ExposureGroup || data?.Group || groupId,
+                        Agent: typeof r?.Agent === 'string' ? r.Agent.trim() : '',
+                        AgentKey: r?.AgentKey || normalizeAgent(r?.Agent).key,
+                        TWA: (r?.TWA === '' || r?.TWA === undefined || r?.TWA === null) ? null : Number(r?.TWA),
+                        Notes: r?.Notes ?? "",
+                        ImportJobId: r?.ImportJobId ?? null,
+                    })) as SampleInfo[];
+                    const filtered = normalized.filter(r => {
+                        const key = r?.AgentKey || normalizeAgent(r?.Agent).key;
+                        if (!key) return true;
+                        return !removalSet.has(slugifyAgent(key));
+                    });
+                    const filteredAgentKeys = new Set(filtered.map(r => slugifyAgent(r?.AgentKey || normalizeAgent(r?.Agent).key)));
+                    const removedAgentKeyList = Array.from(removalSet).filter(key => !filteredAgentKeys.has(key));
+                    const removedAgentsCount = removedAgentKeyList.length;
+                    if (!filtered.length) {
+                        tx.delete(parentRef);
+                        return { status: 'deleted', summary: FieldValue.delete(), removedAgentsCount: Math.max(removedAgentsCount, removalSet.size) };
+                    }
+                    const sorted = [...filtered].sort((a, b) => parseDateToEpoch(b.SampleDate) - parseDateToEpoch(a.SampleDate));
+                    const limited = sorted.slice(0, 30);
+                    const recomputeState = computeAgentEfState(limited as any, data?.LatestExceedanceFractionByAgent, data?.ExceedanceFractionHistoryByAgent);
+                    let topSnapshot = recomputeState.topSnapshot;
+                    if (!topSnapshot) {
+                        const fallbackMostRecent = getMostRecentSamples(sorted as any, 6);
+                        const fallbackTwa = fallbackMostRecent.map(r => Number(r.TWA)).filter(n => n > 0);
+                        const fallback = createExceedanceFraction((fallbackTwa.length >= 2) ? calculateExceedanceProbability(fallbackTwa, 0.05) : 0, fallbackMostRecent as any, fallbackTwa, { key: 'unknown', name: 'Unknown' }) as AgentEfSnapshot;
+                        fallback.AgentKey = fallback.AgentKey || 'unknown';
+                        fallback.AgentName = fallback.AgentName || 'Unknown';
+                        topSnapshot = fallback;
+                    }
+                    const prevTopCompact = compactEfSnapshot(data?.LatestExceedanceFraction);
+                    const newTopCompact = compactEfSnapshot(topSnapshot);
+                    const topChanged = !deepEqual(prevTopCompact, newTopCompact);
+                    const byAgentSummary = Object.fromEntries(Object.entries(recomputeState.latestByAgent).map(([key, snap]) => [key, {
+                        Agent: snap.AgentName,
+                        AgentKey: snap.AgentKey,
+                        ExceedanceFraction: snap.ExceedanceFraction,
+                        DateCalculated: snap.DateCalculated,
+                        SamplesUsedCount: snap.MostRecentNumber,
+                    }]));
+                    const nowTs = Timestamp.now();
+                    const latestByAgentPayload: Record<string, any> = {};
+                    for (const [key, snapshot] of Object.entries(recomputeState.latestByAgent)) {
+                        latestByAgentPayload[key] = snapshot;
+                    }
+                    const historyByAgentPayload: Record<string, any> = {};
+                    for (const [key, history] of Object.entries(recomputeState.historyByAgent)) {
+                        historyByAgentPayload[key] = history;
+                    }
+                    for (const removedKey of recomputeState.removedAgentKeys) {
+                        latestByAgentPayload[removedKey] = FieldValue.delete();
+                        historyByAgentPayload[removedKey] = FieldValue.delete();
+                    }
+
+                    const payload: any = {
+                        Results: limited,
+                        ResultsPreview: getMostRecentSamples(limited as any, 6),
+                        ResultsTotalCount: limited.length,
+                        LatestExceedanceFractionByAgent: latestByAgentPayload,
+                        ExceedanceFractionHistoryByAgent: historyByAgentPayload,
+                        updatedAt: nowTs,
+                        updatedBy: uid,
+                    };
+                    if (topSnapshot) {
+                        payload.LatestExceedanceFraction = topSnapshot;
+                        if (topChanged || !data?.LatestExceedanceFraction) {
+                            payload.ExceedanceFractionHistory = FieldValue.arrayUnion(topSnapshot as any);
+                            payload.EFComputedAt = nowTs;
+                        }
+                    }
+                    tx.set(parentRef, payload, { merge: true });
+                    const summaryEntry = topSnapshot ? {
+                        GroupId: groupId,
+                        ExposureGroup: data?.ExposureGroup || data?.Group || groupId,
+                        ExceedanceFraction: topSnapshot.ExceedanceFraction,
+                        PreviousExceedanceFraction: prevTopCompact?.ExceedanceFraction ?? null,
+                        Agent: topSnapshot.AgentName ?? null,
+                        AgentKey: topSnapshot.AgentKey ?? null,
+                        OELNumber: topSnapshot.OELNumber,
+                        DateCalculated: topSnapshot.DateCalculated,
+                        SamplesUsedCount: topSnapshot.MostRecentNumber,
+                        ByAgent: byAgentSummary,
+                    } : FieldValue.delete();
+                    return { status: 'updated', summary: summaryEntry, removedAgentsCount };
+                });
+                if (outcome.status === 'deleted') {
+                    orgSummaryUpdate[`EfSummary.${groupId}`] = FieldValue.delete();
+                    groupsDeletedTotal += 1;
+                } else if (outcome.status === 'updated' && outcome.summary) {
+                    orgSummaryUpdate[`EfSummary.${groupId}`] = outcome.summary;
+                }
+                const removedCount = outcome.removedAgentsCount || 0;
+                removedAgentsTotal += removedCount;
+                await flushProgress({ groups: 1, agents: removedCount, groupsDeleted: outcome.status === 'deleted' ? 1 : undefined });
+            } catch (e: any) {
+                failuresTotal += 1;
+                logger.error('removeAgentsFromExposureGroups worker failed', { orgId, groupId, error: e?.message || String(e) });
+                await flushProgress({ groups: 1, agents: 0, failures: 1 });
+            }
+            processedTotal += 1;
+        }
+    });
+    await Promise.all(workers);
     if (Object.keys(orgSummaryUpdate).length > 0) {
         const orgRef = db.doc(`organizations/${orgId}`);
         await orgRef.set(orgSummaryUpdate as any, { merge: true });
     }
-    return { ok: true, groups: normalizedRemovals.size, removedAgents: removedAgentsTotal };
+    if (jobRef && jobDocAvailable) {
+        try {
+            await jobRef.set({
+                status: failuresTotal > 0 ? 'completed-with-errors' : 'completed',
+                completedAt: Timestamp.now(),
+                updatedAt: Timestamp.now(),
+                groupsProcessed: processedTotal,
+                groupsDeleted: groupsDeletedTotal,
+                agentsRemoved: removedAgentsTotal,
+                failures: failuresTotal,
+            }, { merge: true });
+        } catch (e: any) {
+            logger.warn('removeAgentsFromExposureGroups: finalize job failed', { orgId, jobId, error: e?.message || String(e) });
+        }
+    }
+    return { ok: true, groups: normalizedRemovals.size, removedAgents: removedAgentsTotal, jobId, groupsDeleted: groupsDeletedTotal, failures: failuresTotal };
 });
 
 
