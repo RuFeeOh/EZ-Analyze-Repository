@@ -111,6 +111,14 @@ function compactResults(results: SampleInfo[] | undefined): any[] {
     }));
 }
 
+function summarizeResultsForAudit(results: SampleInfo[] | undefined): { total: number; preview: any[] } {
+    const arr = Array.isArray(results) ? results : [];
+    return {
+        total: arr.length,
+        preview: compactResults(arr.slice(0, 30)),
+    };
+}
+
 function compactEfSnapshot(snapshot: any) {
     if (!snapshot || typeof snapshot !== 'object') return null;
     return {
@@ -120,6 +128,49 @@ function compactEfSnapshot(snapshot: any) {
         AgentName: snapshot.AgentName ?? null,
         Results: compactResults(snapshot.ResultsUsed),
     };
+}
+
+function compactLatestMapForAudit(map: Record<string, AgentEfSnapshot> | undefined): Record<string, any> {
+    if (!map || typeof map !== 'object') return {};
+    const out: Record<string, any> = {};
+    for (const [key, snapshot] of Object.entries(map)) {
+        const compact = compactEfSnapshot(snapshot);
+        if (compact) out[key] = compact;
+    }
+    return out;
+}
+
+type AuditLogRecord = {
+    type: 'bulk-import' | 'agent-removal' | 'undo-import';
+    at: FirebaseFirestore.Timestamp;
+    actorUid: string;
+    groupId?: string;
+    jobId?: string | null;
+    metadata?: Record<string, any>;
+    before?: any;
+    after?: any;
+};
+
+async function appendAuditRecords(orgId: string, entries: AuditLogRecord[]): Promise<void> {
+    if (!Array.isArray(entries) || entries.length === 0) return;
+    const db = getFirestore();
+    const chunkSize = 25;
+    for (let i = 0; i < entries.length; i += chunkSize) {
+        const chunk = entries.slice(i, i + chunkSize);
+        await Promise.all(chunk.map(async (entry) => {
+            try {
+                await db.collection(`organizations/${orgId}/auditLogs`).add({
+                    orgId,
+                    ...entry,
+                    metadata: entry.metadata || {},
+                    before: entry.before ?? null,
+                    after: entry.after ?? null,
+                });
+            } catch (e: any) {
+                logger.warn('appendAuditRecords failed', { orgId, error: e?.message || String(e) });
+            }
+        }));
+    }
 }
 
 function deepEqual(a: any, b: any): boolean {
@@ -760,6 +811,7 @@ export const bulkImportResults = onCall({ timeoutSeconds: 540, memory: '1GiB' },
     let failuresCount = 0;
     const orgSummaryUpdate: Record<string, any> = {};
     const undoGroups: Record<string, any> = {};
+    const auditEntries: AuditLogRecord[] = [];
     for (const g of groups as GroupIn[]) {
         const groupId = slugify(g.groupName);
         const parentRef = db.doc(`organizations/${orgId}/exposureGroups/${groupId}`);
@@ -902,6 +954,12 @@ export const bulkImportResults = onCall({ timeoutSeconds: 540, memory: '1GiB' },
                 const prevLatestByAgent = normalizeLatestMap(data?.LatestExceedanceFractionByAgent);
                 const hasPrevAgentSnapshots = Object.keys(prevLatestByAgent).length > 0;
                 const shouldSkipEf = unchangedKeyTWA && hasPrevAgentSnapshots && changedAgents.size === 0;
+                const prevTopCompact = compactEfSnapshot(data?.LatestExceedanceFraction);
+                const auditBefore = {
+                    results: summarizeResultsForAudit(existingNorm as any),
+                    latestByAgent: compactLatestMapForAudit(prevLatestByAgent),
+                    latest: prevTopCompact,
+                };
                 if (shouldSkipEf && data?.LatestExceedanceFraction) {
                     // Skip EF recompute/history if inputs unchanged; still update Results & Preview
                     const payload: any = {
@@ -920,8 +978,28 @@ export const bulkImportResults = onCall({ timeoutSeconds: 540, memory: '1GiB' },
                         payload.createdBy = uid;
                     }
                     tx.set(parentRef, payload, { merge: true });
+                    const audit: AuditLogRecord = {
+                        type: 'bulk-import',
+                        at: nowTs,
+                        actorUid: uid,
+                        groupId,
+                        jobId,
+                        metadata: {
+                            skippedEf: true,
+                            totalResultsBefore: existingNorm.length,
+                            totalResultsAfter: mergedUnique.length,
+                            changedAgents: Array.from(changedAgents),
+                            replacedKeys: Object.keys(replaced),
+                        },
+                        before: auditBefore,
+                        after: {
+                            results: summarizeResultsForAudit(limited as any),
+                            latestByAgent: compactLatestMapForAudit(prevLatestByAgent),
+                            latest: prevTopCompact,
+                        },
+                    };
                     // No org summary entry necessary; no EF change
-                    return { entry: null, patch: { groupId, replaced } };
+                    return { entry: null, patch: { groupId, replaced }, audit };
                 } else {
                     const agentEfState = computeAgentEfState(limited as any, data?.LatestExceedanceFractionByAgent, data?.ExceedanceFractionHistoryByAgent);
                     let topSnapshot = agentEfState.topSnapshot;
@@ -933,7 +1011,6 @@ export const bulkImportResults = onCall({ timeoutSeconds: 540, memory: '1GiB' },
                         fallback.AgentName = fallback.AgentName || 'Unknown';
                         topSnapshot = fallback;
                     }
-                    const prevTopCompact = compactEfSnapshot(data?.LatestExceedanceFraction);
                     const newTopCompact = compactEfSnapshot(topSnapshot);
                     const topChanged = !deepEqual(prevTopCompact, newTopCompact);
                     const byAgentSummary = Object.fromEntries(Object.entries(agentEfState.latestByAgent).map(([key, snap]) => [key, {
@@ -984,7 +1061,29 @@ export const bulkImportResults = onCall({ timeoutSeconds: 540, memory: '1GiB' },
                         ByAgent: byAgentSummary,
                     } : null;
                     // Return both entry and undo metadata for this group
-                    return { entry, patch: { groupId, replaced } };
+                    const audit: AuditLogRecord = {
+                        type: 'bulk-import',
+                        at: nowTs,
+                        actorUid: uid,
+                        groupId,
+                        jobId,
+                        metadata: {
+                            skippedEf: false,
+                            totalResultsBefore: existingNorm.length,
+                            totalResultsAfter: mergedUnique.length,
+                            changedAgents: Array.from(changedAgents),
+                            replacedKeys: Object.keys(replaced),
+                            previousEf: prevTopCompact?.ExceedanceFraction ?? null,
+                            newEf: topSnapshot?.ExceedanceFraction ?? null,
+                        },
+                        before: auditBefore,
+                        after: {
+                            results: summarizeResultsForAudit(limited as any),
+                            latestByAgent: compactLatestMapForAudit(agentEfState.latestByAgent),
+                            latest: newTopCompact,
+                        },
+                    };
+                    return { entry, patch: { groupId, replaced }, audit };
                 }
             });
             // Stage for a single org doc update after loop
@@ -993,6 +1092,9 @@ export const bulkImportResults = onCall({ timeoutSeconds: 540, memory: '1GiB' },
             }
             if (txResult?.patch) {
                 undoGroups[groupId] = txResult.patch;
+            }
+            if (txResult?.audit) {
+                auditEntries.push(txResult.audit);
             }
         } catch (e: any) {
             failuresCount += 1;
@@ -1046,6 +1148,9 @@ export const bulkImportResults = onCall({ timeoutSeconds: 540, memory: '1GiB' },
         }
     }
 
+    if (auditEntries.length) {
+        await appendAuditRecords(orgId, auditEntries);
+    }
     return { ok: true, groups: (groups as GroupIn[]).length, rowsWritten, failures: failuresCount, jobId };
 });
 
@@ -1078,6 +1183,7 @@ export const undoImport = onCall({ timeoutSeconds: 540, memory: '1GiB' }, async 
     let removedBatch = 0;
     let restoredBatch = 0;
     let failuresBatch = 0;
+    const auditEntries: AuditLogRecord[] = [];
     const flushProgress = async (lastGroupId?: string) => {
         if (processedBatch === 0 && removedBatch === 0 && restoredBatch === 0 && failuresBatch === 0) return;
         try {
@@ -1107,6 +1213,9 @@ export const undoImport = onCall({ timeoutSeconds: 540, memory: '1GiB' }, async 
             processedBatch += 1;
             removedBatch += (stats.removedCount || 0);
             restoredBatch += (stats.restoredCount || 0);
+            if (stats.audit) {
+                auditEntries.push(stats.audit);
+            }
             if ((processedBatch % FLUSH_EVERY) === 0) {
                 await flushProgress(groupId);
             }
@@ -1143,6 +1252,9 @@ export const undoImport = onCall({ timeoutSeconds: 540, memory: '1GiB' }, async 
             undoUpdatedAt: Timestamp.now(),
         }, { merge: true });
     } catch { }
+    if (auditEntries.length) {
+        await appendAuditRecords(orgId, auditEntries);
+    }
     return { ok: failures === 0, failures, revertedGroups: groupIds.length };
 });
 
@@ -1219,6 +1331,7 @@ export const removeAgentsFromExposureGroups = onCall(async (request) => {
     let groupsDeletedTotal = 0;
     let failuresTotal = 0;
     let processedTotal = 0;
+    const auditEntries: AuditLogRecord[] = [];
     const queue = Array.from(normalizedRemovals.entries());
     const workerCount = Math.min(Math.max(1, Number(process.env.REMOVE_AGENTS_CONCURRENCY || 8)), queue.length || 1);
     const workers = new Array(workerCount).fill(0).map(async () => {
@@ -1247,6 +1360,8 @@ export const removeAgentsFromExposureGroups = onCall(async (request) => {
                         Notes: r?.Notes ?? "",
                         ImportJobId: r?.ImportJobId ?? null,
                     })) as SampleInfo[];
+                    const prevLatestByAgent = normalizeLatestMap(data?.LatestExceedanceFractionByAgent);
+                    const prevTopCompact = compactEfSnapshot(data?.LatestExceedanceFraction);
                     const filtered = normalized.filter(r => {
                         const key = r?.AgentKey || normalizeAgent(r?.Agent).key;
                         if (!key) return true;
@@ -1257,7 +1372,29 @@ export const removeAgentsFromExposureGroups = onCall(async (request) => {
                     const removedAgentsCount = removedAgentKeyList.length;
                     if (!filtered.length) {
                         tx.delete(parentRef);
-                        return { status: 'deleted', summary: FieldValue.delete(), removedAgentsCount: Math.max(removedAgentsCount, removalSet.size) };
+                        const audit: AuditLogRecord = {
+                            type: 'agent-removal',
+                            at: Timestamp.now(),
+                            actorUid: uid,
+                            groupId,
+                            metadata: {
+                                status: 'deleted',
+                                removedAgents: removedAgentKeyList,
+                                removalRequestCount: removalSet.size,
+                                totalResultsBefore: normalized.length,
+                            },
+                            before: {
+                                results: summarizeResultsForAudit(normalized as any),
+                                latestByAgent: compactLatestMapForAudit(prevLatestByAgent),
+                                latest: prevTopCompact,
+                            },
+                            after: {
+                                results: summarizeResultsForAudit([]),
+                                latestByAgent: {},
+                                latest: null,
+                            },
+                        };
+                        return { status: 'deleted', summary: FieldValue.delete(), removedAgentsCount: Math.max(removedAgentsCount, removalSet.size), audit };
                     }
                     const sorted = [...filtered].sort((a, b) => parseDateToEpoch(b.SampleDate) - parseDateToEpoch(a.SampleDate));
                     const limited = sorted.slice(0, 30);
@@ -1271,7 +1408,6 @@ export const removeAgentsFromExposureGroups = onCall(async (request) => {
                         fallback.AgentName = fallback.AgentName || 'Unknown';
                         topSnapshot = fallback;
                     }
-                    const prevTopCompact = compactEfSnapshot(data?.LatestExceedanceFraction);
                     const newTopCompact = compactEfSnapshot(topSnapshot);
                     const topChanged = !deepEqual(prevTopCompact, newTopCompact);
                     const byAgentSummary = Object.fromEntries(Object.entries(recomputeState.latestByAgent).map(([key, snap]) => [key, {
@@ -1324,7 +1460,30 @@ export const removeAgentsFromExposureGroups = onCall(async (request) => {
                         SamplesUsedCount: topSnapshot.MostRecentNumber,
                         ByAgent: byAgentSummary,
                     } : FieldValue.delete();
-                    return { status: 'updated', summary: summaryEntry, removedAgentsCount };
+                    const audit: AuditLogRecord = {
+                        type: 'agent-removal',
+                        at: nowTs,
+                        actorUid: uid,
+                        groupId,
+                        metadata: {
+                            status: 'updated',
+                            removedAgents: removedAgentKeyList,
+                            removalRequestCount: removalSet.size,
+                            totalResultsBefore: normalized.length,
+                            totalResultsAfter: filtered.length,
+                        },
+                        before: {
+                            results: summarizeResultsForAudit(normalized as any),
+                            latestByAgent: compactLatestMapForAudit(prevLatestByAgent),
+                            latest: prevTopCompact,
+                        },
+                        after: {
+                            results: summarizeResultsForAudit(filtered as any),
+                            latestByAgent: compactLatestMapForAudit(recomputeState.latestByAgent),
+                            latest: compactEfSnapshot(topSnapshot),
+                        },
+                    };
+                    return { status: 'updated', summary: summaryEntry, removedAgentsCount, audit };
                 });
                 if (outcome.status === 'deleted') {
                     orgSummaryUpdate[`EfSummary.${groupId}`] = FieldValue.delete();
@@ -1334,6 +1493,9 @@ export const removeAgentsFromExposureGroups = onCall(async (request) => {
                 }
                 const removedCount = outcome.removedAgentsCount || 0;
                 removedAgentsTotal += removedCount;
+                if (outcome.audit) {
+                    auditEntries.push(outcome.audit);
+                }
                 await flushProgress({ groups: 1, agents: removedCount, groupsDeleted: outcome.status === 'deleted' ? 1 : undefined });
             } catch (e: any) {
                 failuresTotal += 1;
@@ -1363,13 +1525,16 @@ export const removeAgentsFromExposureGroups = onCall(async (request) => {
             logger.warn('removeAgentsFromExposureGroups: finalize job failed', { orgId, jobId, error: e?.message || String(e) });
         }
     }
+    if (auditEntries.length) {
+        await appendAuditRecords(orgId, auditEntries);
+    }
     return { ok: true, groups: normalizedRemovals.size, removedAgents: removedAgentsTotal, jobId, groupsDeleted: groupsDeletedTotal, failures: failuresTotal };
 });
 
 
-async function checkGroupIfItShouldBeUpdated(db: admin.firestore.Firestore, orgId: any, groupId: string, undo: any, jobId: any, uid: string, orgSummaryUpdate: Record<string, any>): Promise<{ removedCount: number, restoredCount: number, emptied: boolean }> {
+async function checkGroupIfItShouldBeUpdated(db: admin.firestore.Firestore, orgId: any, groupId: string, undo: any, jobId: any, uid: string, orgSummaryUpdate: Record<string, any>): Promise<{ removedCount: number, restoredCount: number, emptied: boolean, audit?: AuditLogRecord }> {
     const parentRef = db.doc(`organizations/${orgId}/exposureGroups/${groupId}`);
-    let result = { removedCount: 0, restoredCount: 0, emptied: false };
+    let result: { removedCount: number; restoredCount: number; emptied: boolean; audit?: AuditLogRecord } = { removedCount: 0, restoredCount: 0, emptied: false };
     await db.runTransaction(async (tx: any) => {
         const snap = await tx.get(parentRef);
         if (!snap.exists) return;
@@ -1387,7 +1552,7 @@ function undoImportsAndRespectExisting(
     tx: any,
     parentRef: admin.firestore.DocumentReference<admin.firestore.DocumentData, admin.firestore.DocumentData>,
     orgSummaryUpdate: Record<string, any>,
-): { removedCount: number, restoredCount: number, emptied: boolean } {
+): { removedCount: number, restoredCount: number, emptied: boolean, audit?: AuditLogRecord } {
     const data = (snap.data() || {}) as any;
     const eGResults: any[] = Array.isArray(data.Results) ? (data.Results as any[]) : [];
     const replacedMap: Record<string, any> = (undo.groups[groupId]?.replaced || {});
@@ -1395,6 +1560,18 @@ function undoImportsAndRespectExisting(
     const keep: any[] = [];
     const seenKeys = new Set<string>();
     let removedCount = 0;
+    const normalize = (r: any): SampleInfo => ({
+        Location: r?.Location ?? "",
+        SampleNumber: (r?.SampleNumber === undefined || r?.SampleNumber === '') ? null : r?.SampleNumber,
+        SampleDate: r?.SampleDate ?? "",
+        ExposureGroup: r?.ExposureGroup || r?.Group || data?.Group || data?.ExposureGroup || groupId,
+        Agent: r?.Agent ?? "",
+        AgentKey: r?.AgentKey || normalizeAgent(r?.Agent).key,
+        TWA: (r?.TWA === '' || r?.TWA === undefined || r?.TWA === null) ? null : Number(r?.TWA),
+        Notes: r?.Notes ?? "",
+        ImportJobId: r?.ImportJobId ?? null,
+    } as SampleInfo);
+    const normalizedBefore = eGResults.map(normalize);
     findExistingResults(eGResults, (result: any) => getRowKeyVariants(result), jobId, replacedMap, keep, seenKeys, (dropped: boolean) => { if (dropped) removedCount += 1; });
     // Restore replaced rows
     let restoredCount = 0;
@@ -1416,30 +1593,45 @@ function undoImportsAndRespectExisting(
         }
     }
     // Sort and limit
-    const sorted = keep
-        .map((r: any) => ({
-            Location: r?.Location ?? "",
-            SampleNumber: (r?.SampleNumber === undefined || r?.SampleNumber === '') ? null : r?.SampleNumber,
-            SampleDate: r?.SampleDate ?? "",
-            ExposureGroup: r?.ExposureGroup || r?.Group || data?.Group || data?.ExposureGroup || groupId,
-            Agent: r?.Agent ?? "",
-            AgentKey: r?.AgentKey || normalizeAgent(r?.Agent).key,
-            TWA: (r?.TWA === '' || r?.TWA === undefined || r?.TWA === null) ? null : Number(r?.TWA),
-            Notes: r?.Notes ?? "",
-            ImportJobId: r?.ImportJobId ?? null,
-        }))
-        .sort((a, b) => parseDateToEpoch(b.SampleDate) - parseDateToEpoch(a.SampleDate))
-        .slice(0, 30);
+    const normalizedAfterAll = keep
+        .map(normalize)
+        .sort((a, b) => parseDateToEpoch(b.SampleDate) - parseDateToEpoch(a.SampleDate));
+    const limited = normalizedAfterAll.slice(0, 30);
+    const prevLatestByAgent = normalizeLatestMap(data?.LatestExceedanceFractionByAgent);
+    const prevTopCompact = compactEfSnapshot(data?.LatestExceedanceFraction);
+    const auditBefore = {
+        results: summarizeResultsForAudit(normalizedBefore as any),
+        latestByAgent: compactLatestMapForAudit(prevLatestByAgent),
+        latest: prevTopCompact,
+    };
 
     // If no results remain after undo, delete the group and clear org summary
-    if (sorted.length === 0) {
+    if (limited.length === 0) {
+        const audit: AuditLogRecord = {
+            type: 'undo-import',
+            at: Timestamp.now(),
+            actorUid: uid,
+            groupId,
+            jobId: typeof jobId === 'string' ? jobId : null,
+            metadata: {
+                removedCount,
+                restoredCount,
+                emptied: true,
+            },
+            before: auditBefore,
+            after: {
+                results: summarizeResultsForAudit([]),
+                latestByAgent: {},
+                latest: null,
+            },
+        };
         tx.delete(parentRef);
         orgSummaryUpdate[`EfSummary.${groupId}`] = FieldValue.delete();
-        return { removedCount, restoredCount, emptied: true };
+        return { removedCount, restoredCount, emptied: true, audit };
     }
 
-    const mostRecent = getMostRecentSamples(sorted as any, 6);
-    const agentEfState = computeAgentEfState(sorted as any, data?.LatestExceedanceFractionByAgent, data?.ExceedanceFractionHistoryByAgent);
+    const mostRecent = getMostRecentSamples(limited as any, 6);
+    const agentEfState = computeAgentEfState(limited as any, data?.LatestExceedanceFractionByAgent, data?.ExceedanceFractionHistoryByAgent);
     let topSnapshot = agentEfState.topSnapshot;
     if (!topSnapshot) {
         const fallbackTwa = mostRecent.map(r => Number(r.TWA)).filter(n => n > 0);
@@ -1448,7 +1640,6 @@ function undoImportsAndRespectExisting(
         fallback.AgentName = fallback.AgentName || 'Unknown';
         topSnapshot = fallback;
     }
-    const prevTopCompact = compactEfSnapshot(data?.LatestExceedanceFraction);
     const newTopCompact = compactEfSnapshot(topSnapshot);
     const topChanged = !deepEqual(prevTopCompact, newTopCompact);
     const byAgentSummary = Object.fromEntries(Object.entries(agentEfState.latestByAgent).map(([key, snap]) => [key, {
@@ -1461,9 +1652,9 @@ function undoImportsAndRespectExisting(
     const nowTs = Timestamp.now();
 
     const payload: any = {
-        Results: sorted,
+        Results: limited,
         ResultsPreview: mostRecent,
-        ResultsTotalCount: sorted.length,
+        ResultsTotalCount: limited.length,
         LatestExceedanceFractionByAgent: agentEfState.latestByAgent,
         ExceedanceFractionHistoryByAgent: agentEfState.historyByAgent,
         updatedAt: nowTs,
@@ -1492,8 +1683,28 @@ function undoImportsAndRespectExisting(
     } else {
         orgSummaryUpdate[`EfSummary.${groupId}`] = FieldValue.delete();
     }
+    const audit: AuditLogRecord = {
+        type: 'undo-import',
+        at: nowTs,
+        actorUid: uid,
+        groupId,
+        jobId: typeof jobId === 'string' ? jobId : null,
+        metadata: {
+            removedCount,
+            restoredCount,
+            emptied: false,
+            totalResultsBefore: normalizedBefore.length,
+            totalResultsAfter: normalizedAfterAll.length,
+        },
+        before: auditBefore,
+        after: {
+            results: summarizeResultsForAudit(normalizedAfterAll as any),
+            latestByAgent: compactLatestMapForAudit(agentEfState.latestByAgent),
+            latest: newTopCompact,
+        },
+    };
 
-    return { removedCount, restoredCount, emptied: false };
+    return { removedCount, restoredCount, emptied: false, audit };
 }
 
 function findExistingResults(
