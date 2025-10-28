@@ -10,13 +10,28 @@ import { AgentEfState } from "../models/agent-ef-state.model";
 import * as admin from "firebase-admin";
 import { Agent } from "../models/agent.model";
 import { createExceedanceFraction, calculateExceedanceProbability } from "./ef";
+import { IncomingSampleInfo } from "../models/incoming-sample-info.model";
+import { slugify } from "./common";
+import { getRowKeyVariants, normalizeResults, toKeySignatureMap } from "./results";
+import { SampleGroupIn } from "../models/sample-group-in.model";
+import { ImportSampleInfo } from "../models/import-sample-info.model";
 
 
 const timeoutMinute = 4;
 const timeoutSeconds = timeoutMinute * 60;
 // HTTPS callable: bulk import results using Firestore BulkWriter for speed
 export const bulkImportResults = onCall({ timeoutSeconds: timeoutSeconds, memory: '1GiB' }, async (request) => {
-    const { orgId, organizationName, groups, trackJob, jobId: providedJobId, importId: providedImportId, finalize, totalGroups: totalGroupsProvided, totalRows: totalRowsProvided } = request.data || {};
+    const {
+        orgId,
+        organizationName,
+        groups,
+        trackJob,
+        jobId: providedJobId,
+        importId: providedImportId,
+        finalize,
+        totalGroups: totalGroupsProvided,
+        totalRows: totalRowsProvided
+    } = request.data || {};
 
     const agentsList: Agent[] = await loadAgents(orgId);
 
@@ -25,420 +40,141 @@ export const bulkImportResults = onCall({ timeoutSeconds: timeoutSeconds, memory
         throw new HttpsError('invalid-argument', 'orgId and groups[] required');
     }
     const db = getFirestore();
-    const chosenId = ((): string => {
-        const incoming = providedJobId || providedImportId; // support either name from client
-        if (incoming && typeof incoming === 'string' && incoming.trim()) return incoming.trim();
-        return `job_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    })();
-    const jobId = chosenId;
+    const jobId = getIdForJob(providedJobId, providedImportId);
     const jobRef = db.doc(`organizations/${orgId}/importJobs/${jobId}`);
-
-    type IncomingSample = { Location?: string; SampleNumber?: string | number | null; SampleDate?: string; ExposureGroup?: string; Agent?: string; AgentKey?: string; TWA?: number | string | null; Notes?: string };
-    type GroupIn = { groupName: string; samples: IncomingSample[] };
-
-    const slugify = (text: string): string => (text || '').toLowerCase().trim().replace(/\s+/g, '-').replace(/[^a-z0-9\-]/g, '').replace(/-+/g, '-').slice(0, 120);
-    const sanitize = (r: any) => {
-        const sampleNumber = r?.SampleNumber;
-        const twaRaw = r?.TWA;
-        const twa = (twaRaw === '' || twaRaw === undefined || twaRaw === null) ? null : Number(twaRaw);
-        const agentRaw = typeof r?.Agent === 'string' ? r.Agent.trim() : '';
-        const agentKey = normalizeAgent(agentRaw).key;
-        return {
-            Location: r?.Location ?? "",
-            SampleNumber: (sampleNumber === undefined || sampleNumber === '') ? null : sampleNumber,
-            SampleDate: r?.SampleDate ?? "",
-            ExposureGroup: r?.ExposureGroup ?? "",
-            Agent: agentRaw,
-            AgentKey: agentKey,
-            TWA: twa,
-            Notes: r?.Notes ?? "",
-        } as IncomingSample;
-    };
-
-    // No pre-existence fetch; rely on transaction snap.exists later to set createdAt/By
 
     // Initialize job doc on first batch; subsequent batches will just increment counters
     if (trackJob) {
-        try {
-            const snap = await jobRef.get();
-            if (!snap.exists) {
-                const totalGroupsAll = typeof totalGroupsProvided === 'number' ? totalGroupsProvided : (groups as GroupIn[]).length;
-                const totalRowsAll = typeof totalRowsProvided === 'number' ? totalRowsProvided : (groups as GroupIn[]).reduce((sum, g) => sum + (g.samples?.length || 0), 0);
-                await jobRef.set({
-                    status: 'running',
-                    phase: 'running',
-                    totalGroups: totalGroupsAll,
-                    totalRows: totalRowsAll,
-                    groupsProcessed: 0,
-                    rowsWritten: 0,
-                    failures: 0,
-                    startedAt: Timestamp.now(),
-                    updatedAt: Timestamp.now(),
-                    createdBy: uid,
-                }, { merge: true });
-            }
-        } catch (e) { logger.warn('bulkImportResults: failed to init job doc', { error: (e as any)?.message || String(e) }); }
+        await startJobTracking(jobRef, totalGroupsProvided, groups, totalRowsProvided, uid);
     }
 
-    // Merge incoming rows into parent Results array (single write per group)
-    // Also accumulate an organization-level EfSummary map to reduce client reads
-    // and build per-job undo metadata to support reverting this upload
-    let rowsWritten = 0;
-    let failuresCount = 0;
-    const orgSummaryUpdate: Record<string, any> = {};
-    const undoGroups: Record<string, any> = {};
-    const auditEntries: AuditLogRecord[] = [];
-    for (const g of groups as GroupIn[]) {
-        const groupId = slugify(g.groupName);
-        const parentRef = db.doc(`organizations/${orgId}/exposureGroups/${groupId}`);
-        const incoming = (g.samples || []).map(sanitize) as SampleInfo[];
-        rowsWritten += incoming.length;
-        try {
-            const txResult = await db.runTransaction(async (tx: any) => {
-                const snap = await tx.get(parentRef);
-                const data = snap.exists ? ((snap.data() || {}) as any) : {};
-                const existingResults: SampleInfo[] = Array.isArray(data.Results) ? (data.Results as any[]) : [];
-
-                // Normalize rows to a canonical shape with agent metadata
-                const normalize = (r: any, isExisting = false) => {
-                    const sampleNumberRaw = r?.SampleNumber;
-                    const twaRaw = r?.TWA;
-                    const twa = (twaRaw === '' || twaRaw === undefined || twaRaw === null) ? null : Number(twaRaw);
-                    const agentRaw = typeof r?.Agent === 'string' ? r.Agent.trim() : '';
-                    const agentKey = (r?.AgentKey && typeof r.AgentKey === 'string') ? r.AgentKey : normalizeAgent(agentRaw).key;
-                    return {
-                        Location: r?.Location ?? "",
-                        SampleNumber: (sampleNumberRaw === undefined || sampleNumberRaw === '') ? null : sampleNumberRaw,
-                        SampleDate: r?.SampleDate ?? "",
-                        ExposureGroup: r?.ExposureGroup || r?.Group || g.groupName,
-                        Agent: agentRaw,
-                        AgentKey: agentKey,
-                        TWA: (twa === null || Number.isNaN(twa)) ? null : twa,
-                        Notes: r?.Notes ?? "",
-                        ImportJobId: isExisting ? (r?.ImportJobId ?? null) : jobId,
-                    };
-                };
-
-                const existingNorm = (existingResults || []).map(r => normalize(r, true));
-                const incomingNorm = (incoming || []).map(r => normalize(r, false));
-
-                const toKeySignatureMap = (arr: any[]) => {
-                    const m = new Map<string, { twa: number | null; agentKey: string }>();
-                    for (const r of (arr || [])) {
-                        const { compound, agentKey } = getRowKeyVariants(r);
-                        if (!compound) continue;
-                        const twaRaw = (r?.TWA === '' || r?.TWA === undefined || r?.TWA === null) ? null : Number(r.TWA);
-                        const twaVal = (twaRaw === null || Number.isNaN(twaRaw)) ? null : twaRaw;
-                        m.set(compound, { twa: twaVal, agentKey });
-                    }
-                    return m;
-                };
-
-                const mapsEqual = (a: Map<string, { twa: number | null; agentKey: string }>, b: Map<string, { twa: number | null; agentKey: string }>) => {
-                    if (a.size !== b.size) return false;
-                    for (const [k, v] of a.entries()) {
-                        const bv = b.get(k);
-                        if (!bv) return false;
-                        const twaEqual = (v.twa === null && bv.twa === null) || (v.twa !== null && bv.twa !== null && almostEqual(v.twa, bv.twa));
-                        if (!twaEqual) return false;
-                        if ((v.agentKey || '') !== (bv.agentKey || '')) return false;
-                    }
-                    return true;
-                };
-
-                const prevMap = toKeySignatureMap(existingNorm);
-                const nextMap = toKeySignatureMap(incomingNorm);
-                const unchangedKeyTWA = mapsEqual(prevMap, nextMap);
-
-                const changedAgents = new Set<string>();
-                const unionKeys = new Set<string>([...prevMap.keys(), ...nextMap.keys()]);
-                for (const key of unionKeys) {
-                    const before = prevMap.get(key);
-                    const after = nextMap.get(key);
-                    if (!before && after) {
-                        if (after.agentKey) changedAgents.add(after.agentKey);
-                        continue;
-                    }
-                    if (before && !after) {
-                        if (before.agentKey) changedAgents.add(before.agentKey);
-                        continue;
-                    }
-                    if (!before || !after) continue;
-                    const twaChanged = !((before.twa === null && after.twa === null) || (before.twa !== null && after.twa !== null && almostEqual(before.twa, after.twa)));
-                    const agentChanged = (before.agentKey || '') !== (after.agentKey || '');
-                    if (twaChanged || agentChanged) {
-                        if (before.agentKey) changedAgents.add(before.agentKey);
-                        if (after.agentKey) changedAgents.add(after.agentKey);
-                    }
-                }
-
-                const collectNoKeyAgents = (arr: any[]) => {
-                    const set = new Set<string>();
-                    for (const r of (arr || [])) {
-                        const { sample, agentKey } = getRowKeyVariants(r);
-                        if (sample !== null) continue;
-                        if (agentKey) set.add(agentKey);
-                    }
-                    return set;
-                };
-                const noKeyIncomingAgents = collectNoKeyAgents(incomingNorm);
-                const noKeyExistingAgents = collectNoKeyAgents(existingNorm);
-                for (const agentKey of noKeyIncomingAgents) changedAgents.add(agentKey);
-                for (const agentKey of noKeyExistingAgents) changedAgents.add(agentKey);
-
-                // Build map keyed by SampleNumber for replacement, and collect no-key entries separately
-                const byCompoundKey = new Map<string, any>();
-                const noKey: any[] = [];
-                const replaced: Record<string, any> = {};
-
-                for (const r of existingNorm) {
-                    const keyInfo = getRowKeyVariants(r);
-                    if (!keyInfo.compound) {
-                        noKey.push(r);
-                    } else {
-                        byCompoundKey.set(keyInfo.compound, r);
-                    }
-                }
-
-                for (const r of incomingNorm) {
-                    const keyInfo = getRowKeyVariants(r);
-                    if (!keyInfo.compound) {
-                        // No key available; append as a distinct row
-                        noKey.push(r);
-                    } else {
-                        // Replace or add
-                        const key = keyInfo.compound;
-                        const prev = byCompoundKey.get(key);
-                        if (prev) {
-                            // Track previous row so we can restore on undo
-                            replaced[key] = prev;
-                            const prevKeyInfo = getRowKeyVariants(prev);
-                            if (prevKeyInfo.sample && !replaced[prevKeyInfo.sample]) {
-                                replaced[prevKeyInfo.sample] = prev;
-                            }
-                        }
-                        byCompoundKey.set(key, r);
-                    }
-                }
-
-                const mergedUnique = [...byCompoundKey.values(), ...noKey];
-                const sorted = mergedUnique.sort((a, b) => parseDateToEpoch(b.SampleDate) - parseDateToEpoch(a.SampleDate));
-                const limited = sorted.slice(0, 30);
-                // Prepare preview regardless; EF may be reused if inputs are unchanged
-                const mostRecent = getMostRecentSamples(limited as any, 6);
-                const nowTs = Timestamp.now();
-                const prevLatestByAgent = normalizeLatestMap(data?.LatestExceedanceFractionByAgent);
-                const hasPrevAgentSnapshots = Object.keys(prevLatestByAgent).length > 0;
-                const oelChanged = hasOELChanged(hasPrevAgentSnapshots, prevLatestByAgent, agentsList);
-                const shouldSkipEf = unchangedKeyTWA && hasPrevAgentSnapshots && changedAgents.size === 0 && !oelChanged;
-                const prevTopCompact = compactEfSnapshot(data?.LatestExceedanceFraction);
-                const auditBefore = {
-                    results: summarizeResultsForAudit(existingNorm as any),
-                    latestByAgent: compactLatestMapForAudit(prevLatestByAgent),
-                    latest: prevTopCompact,
-                };
-                if (shouldSkipEf && data?.LatestExceedanceFraction) {
-                    // Skip EF recompute/history if inputs unchanged; still update Results & Preview
-                    const payload: any = {
-                        OrganizationUid: orgId,
-                        OrganizationName: organizationName || null,
-                        Group: g.groupName,
-                        ExposureGroup: g.groupName,
-                        Results: limited,
-                        ResultsPreview: mostRecent,
-                        ResultsTotalCount: limited.length,
-                        updatedAt: nowTs,
-                        updatedBy: uid,
-                    };
-                    if (!snap.exists) {
-                        payload.createdAt = nowTs;
-                        payload.createdBy = uid;
-                    }
-                    tx.set(parentRef, payload, { merge: true });
-                    const audit: AuditLogRecord = {
-                        type: 'bulk-import',
-                        at: nowTs,
-                        actorUid: uid,
-                        groupId,
-                        jobId,
-                        metadata: {
-                            skippedEf: true,
-                            totalResultsBefore: existingNorm.length,
-                            totalResultsAfter: mergedUnique.length,
-                            changedAgents: Array.from(changedAgents),
-                            replacedKeys: Object.keys(replaced),
-                        },
-                        before: auditBefore,
-                        after: {
-                            results: summarizeResultsForAudit(limited as any),
-                            latestByAgent: compactLatestMapForAudit(prevLatestByAgent),
-                            latest: prevTopCompact,
-                        },
-                    };
-                    // No org summary entry necessary; no EF change
-                    return { entry: null, patch: { groupId, replaced }, audit };
-                } else {
-                    const agentEfState = computeAgentEfState(limited as any, data?.LatestExceedanceFractionByAgent, data?.ExceedanceFractionHistoryByAgent, agentsList);
-                    let topSnapshot = agentEfState.topSnapshot;
-                    if (!topSnapshot) {
-                        const fallbackMostRecent = getMostRecentSamples(limited as any, 6);
-                        const fallbackTwa = fallbackMostRecent.map(r => Number(r.TWA)).filter(n => n > 0);
-                        const fallbackAgent = new Agent({
-                            Name: 'Unknown',
-                            OELNumber: 0.05,
-                        });
-                        const fallback = createExceedanceFraction(
-                            (fallbackTwa.length >= 2) ? calculateExceedanceProbability(fallbackTwa, fallbackAgent.OELNumber) : 0,
-                            fallbackMostRecent as any,
-                            fallbackTwa,
-                            fallbackAgent
-                        ) as AgentEfSnapshot;
-                        fallback.AgentKey = fallback.AgentKey || 'unknown';
-                        fallback.AgentName = fallback.AgentName || 'Unknown';
-                        topSnapshot = fallback;
-                    }
-                    const newTopCompact = compactEfSnapshot(topSnapshot);
-                    const topChanged = !deepEqual(prevTopCompact, newTopCompact);
-                    const byAgentSummary = Object.fromEntries(Object.entries(agentEfState.latestByAgent).map(([key, snap]) => [key, {
-                        Agent: snap.AgentName,
-                        AgentKey: snap.AgentKey,
-                        ExceedanceFraction: snap.ExceedanceFraction,
-                        DateCalculated: snap.DateCalculated,
-                        SamplesUsedCount: snap.MostRecentNumber,
-                    }]));
-                    const prevEfVal = prevTopCompact?.ExceedanceFraction ?? null;
-                    const payload: any = {
-                        OrganizationUid: orgId,
-                        OrganizationName: organizationName || null,
-                        Group: g.groupName,
-                        ExposureGroup: g.groupName,
-                        Results: limited,
-                        ResultsPreview: mostRecent,
-                        ResultsTotalCount: limited.length,
-                        updatedAt: nowTs,
-                        updatedBy: uid,
-                        LatestExceedanceFractionByAgent: agentEfState.latestByAgent,
-                        ExceedanceFractionHistoryByAgent: agentEfState.historyByAgent,
-                    };
-                    if (topSnapshot && (topChanged || !data?.LatestExceedanceFraction)) {
-                        payload.LatestExceedanceFraction = topSnapshot;
-                        payload.ExceedanceFractionHistory = FieldValue.arrayUnion(topSnapshot as any);
-                        payload.EFComputedAt = nowTs;
-                    }
-                    if (!payload.ExceedanceFractionHistory && data?.ExceedanceFractionHistory) {
-                        payload.ExceedanceFractionHistory = data.ExceedanceFractionHistory;
-                    }
-                    if (!snap.exists) {
-                        payload.createdAt = nowTs;
-                        payload.createdBy = uid;
-                    }
-                    tx.set(parentRef, payload, { merge: true });
-                    // Build summary entry for org-level EfSummary map
-                    const entry = topSnapshot ? {
-                        GroupId: groupId,
-                        ExposureGroup: g.groupName,
-                        ExceedanceFraction: topSnapshot.ExceedanceFraction,
-                        PreviousExceedanceFraction: prevEfVal,
-                        Agent: topSnapshot.AgentName ?? null,
-                        AgentKey: topSnapshot.AgentKey ?? null,
-                        OELNumber: topSnapshot.OELNumber,
-                        DateCalculated: topSnapshot.DateCalculated,
-                        SamplesUsedCount: topSnapshot.MostRecentNumber,
-                        ByAgent: byAgentSummary,
-                    } : null;
-                    // Return both entry and undo metadata for this group
-                    const audit: AuditLogRecord = {
-                        type: 'bulk-import',
-                        at: nowTs,
-                        actorUid: uid,
-                        groupId,
-                        jobId,
-                        metadata: {
-                            skippedEf: false,
-                            totalResultsBefore: existingNorm.length,
-                            totalResultsAfter: mergedUnique.length,
-                            changedAgents: Array.from(changedAgents),
-                            replacedKeys: Object.keys(replaced),
-                            previousEf: prevTopCompact?.ExceedanceFraction ?? null,
-                            newEf: topSnapshot?.ExceedanceFraction ?? null,
-                        },
-                        before: auditBefore,
-                        after: {
-                            results: summarizeResultsForAudit(limited as any),
-                            latestByAgent: compactLatestMapForAudit(agentEfState.latestByAgent),
-                            latest: newTopCompact,
-                        },
-                    };
-                    return { entry, patch: { groupId, replaced }, audit };
-                }
-            });
-            // Stage for a single org doc update after loop
-            if (txResult?.entry) {
-                orgSummaryUpdate[`EfSummary.${groupId}`] = txResult.entry;
-            }
-            if (txResult?.patch) {
-                undoGroups[groupId] = txResult.patch;
-            }
-            if (txResult?.audit) {
-                auditEntries.push(txResult.audit);
-            }
-        } catch (e: any) {
-            failuresCount += 1;
-            logger.error('bulkImportResults merge/write failed', { group: g.groupName, error: e?.message || String(e) });
-        }
+    let orgSummaryUpdate: Record<string, any> = {};
+    const jobStatus = new importJobStatus({
+        db: db,
+        uid: uid,
+        jobRef: jobRef,
+        orgId: orgId,
+        jobId: jobId,
+        rowsWritten: 0,
+        failuresCount: 0,
+        undoGroups: {},
+        auditEntries: [],
+        groupsProcessed: (groups as SampleGroupIn[]).length,
+        orgSummaryUpdate: {}
+    });
+    for (const g of groups as SampleGroupIn[]) {
+        await processIncomingSamples(
+            g,
+            agentsList,
+            organizationName,
+            jobStatus
+        );
     }
 
     // Apply a consolidated org-level EfSummary update (one write per callable invocation)
-    try {
-        if (Object.keys(orgSummaryUpdate).length > 0) {
-            const orgRef = db.doc(`organizations/${orgId}`);
-            await orgRef.set(orgSummaryUpdate as any, { merge: true });
-        }
-    } catch (e: any) {
-        logger.warn('bulkImportResults: failed to write EfSummary to organization', { orgId, error: e?.message || String(e) });
-    }
+    await updateOrganizationWithExposureGroupSummary(orgSummaryUpdate, db, orgId);
 
     // Persist undo metadata incrementally per group and update counters
     if (trackJob) {
-        try {
-            const nowTs = Timestamp.now();
-            const updates: Record<string, any> = {
-                undoAvailable: true,
-                'undo.orgId': orgId,
-                'undo.jobId': jobId,
-                rowsWritten: FieldValue.increment(rowsWritten),
-                failures: FieldValue.increment(failuresCount),
-                groupsProcessed: FieldValue.increment((groups as GroupIn[]).length),
-                updatedAt: nowTs,
-            };
-            for (const [gid, patch] of Object.entries(undoGroups)) {
-                updates[`undo.groups.${gid}`] = patch;
-            }
-            await jobRef.set(updates, { merge: true });
-        } catch (e: any) {
-            logger.warn('bulkImportResults: failed to write undo metadata/counters', { orgId, jobId, error: e?.message || String(e) });
-        }
+        await updateUndoMetadata(jobStatus);
         // If this is the last batch, finalize the job status
         if (finalize) {
-            try {
-                await db.runTransaction(async (tx: any) => {
-                    const snap = await tx.get(jobRef);
-                    const d = (snap.data() || {}) as any;
-                    const failuresAll = Number(d.failures || 0);
-                    const status = failuresAll > 0 ? 'completed-with-errors' : 'completed';
-                    tx.set(jobRef, { status, phase: 'done', completedAt: Timestamp.now(), updatedAt: Timestamp.now() }, { merge: true });
-                });
-            } catch (e: any) {
-                logger.warn('bulkImportResults: finalize failed', { orgId, jobId, error: e?.message || String(e) });
-            }
+            await finalizeJobStatus(db, jobRef, orgId, jobId);
         }
     }
 
-    if (auditEntries.length) {
-        await appendAuditRecords(orgId, auditEntries);
+    if (jobStatus.auditEntries.length) {
+        await appendAuditRecords(orgId, jobStatus.auditEntries);
     }
-    return { ok: true, groups: (groups as GroupIn[]).length, rowsWritten, failures: failuresCount, jobId };
+    return {
+        ok: true,
+        groups: (groups as SampleGroupIn[]).length,
+        rowsWritten: jobStatus.rowsWritten,
+        failures: jobStatus.failuresCount,
+        jobId: jobStatus.jobId
+    };
 });
+
+class importJobStatus {
+    db!: admin.firestore.Firestore | null;
+    uid!: string;
+    jobRef!: admin.firestore.DocumentReference<admin.firestore.DocumentData, admin.firestore.DocumentData> | null;
+    orgId!: string;
+    jobId!: string;
+    rowsWritten!: number;
+    undoGroups!: Record<string, any>;
+    failures!: number;
+    groupsProcessed!: number;
+    auditEntries!: AuditLogRecord[];
+    failuresCount!: number;
+    orgSummaryUpdate!: Record<string, any>;
+    constructor(init?: Partial<importJobStatus>) {
+        Object.assign(this, init);
+    }
+}
+
+async function startJobTracking(jobRef: admin.firestore.DocumentReference<admin.firestore.DocumentData, admin.firestore.DocumentData>, totalGroupsProvided: any, groups: any[], totalRowsProvided: any, uid: string) {
+    try {
+        const snap = await jobRef.get();
+        if (!snap.exists) {
+            const totalGroupsAll = typeof totalGroupsProvided === 'number' ? totalGroupsProvided : (groups as SampleGroupIn[]).length;
+            const totalRowsAll = typeof totalRowsProvided === 'number' ? totalRowsProvided : (groups as SampleGroupIn[]).reduce((sum, g) => sum + (g.samples?.length || 0), 0);
+            await jobRef.set({
+                status: 'running',
+                phase: 'running',
+                totalGroups: totalGroupsAll,
+                totalRows: totalRowsAll,
+                groupsProcessed: 0,
+                rowsWritten: 0,
+                failures: 0,
+                startedAt: Timestamp.now(),
+                updatedAt: Timestamp.now(),
+                createdBy: uid,
+            }, { merge: true });
+        }
+    } catch (e) { logger.warn('bulkImportResults: failed to init job doc', { error: (e as any)?.message || String(e) }); }
+}
+
+async function finalizeJobStatus(db: admin.firestore.Firestore, jobRef: admin.firestore.DocumentReference<admin.firestore.DocumentData, admin.firestore.DocumentData>, orgId: any, jobId: string) {
+    try {
+        await db.runTransaction(async (tx: any) => {
+            const snap = await tx.get(jobRef);
+            const d = (snap.data() || {}) as any;
+            const failuresAll = Number(d.failures || 0);
+            const status = failuresAll > 0 ? 'completed-with-errors' : 'completed';
+            tx.set(jobRef, { status, phase: 'done', completedAt: Timestamp.now(), updatedAt: Timestamp.now() }, { merge: true });
+        });
+    } catch (e: any) {
+        logger.warn('bulkImportResults: finalize failed', { orgId, jobId, error: e?.message || String(e) });
+    }
+}
+
+async function updateUndoMetadata(jobStatus: importJobStatus) {
+    try {
+        const nowTs = Timestamp.now();
+        const updates: Record<string, any> = {
+            undoAvailable: true,
+            'undo.orgId': jobStatus.orgId,
+            'undo.jobId': jobStatus.jobId,
+            rowsWritten: FieldValue.increment(jobStatus.rowsWritten),
+            failures: FieldValue.increment(jobStatus.failuresCount),
+            groupsProcessed: FieldValue.increment(jobStatus.groupsProcessed),
+            updatedAt: nowTs,
+        };
+        for (const [gid, patch] of Object.entries(jobStatus.undoGroups)) {
+            updates[`undo.groups.${gid}`] = patch;
+        }
+        await jobStatus.jobRef?.set(updates, { merge: true });
+    } catch (e: any) {
+        logger.warn(
+            'bulkImportResults: failed to write undo metadata/counters',
+            {
+                orgId: jobStatus.orgId,
+                jobId: jobStatus.jobId,
+                error: e?.message || String(e)
+            });
+    }
+}
 
 // Callable: undo a previous bulk import by jobId
 export const undoImport = onCall({ timeoutSeconds: 540, memory: '1GiB' }, async (request) => {
@@ -548,6 +284,344 @@ export const undoImport = onCall({ timeoutSeconds: 540, memory: '1GiB' }, async 
 
 
 
+const mapsEqual = (a: Map<string, { twa: number | null; agentKey: string; }>, b: Map<string, { twa: number | null; agentKey: string; }>) => {
+    if (a.size !== b.size) return false;
+    for (const [k, v] of a.entries()) {
+        const bv = b.get(k);
+        if (!bv) return false;
+        const twaEqual = (v.twa === null && bv.twa === null) || (v.twa !== null && bv.twa !== null && almostEqual(v.twa, bv.twa));
+        if (!twaEqual) return false;
+        if ((v.agentKey || '') !== (bv.agentKey || '')) return false;
+    }
+    return true;
+};
+
+
+async function updateOrganizationWithExposureGroupSummary(orgSummaryUpdate: Record<string, any>, db: admin.firestore.Firestore, orgId: any) {
+    try {
+        if (Object.keys(orgSummaryUpdate).length > 0) {
+            const orgRef = db.doc(`organizations/${orgId}`);
+            await orgRef.set(orgSummaryUpdate as any, { merge: true });
+        }
+    } catch (e: any) {
+        logger.warn('bulkImportResults: failed to write EfSummary to organization', { orgId, error: e?.message || String(e) });
+    }
+}
+
+async function processIncomingSamples(
+    g: SampleGroupIn,
+    agentsList: Agent[],
+    organizationName: any,
+    jobStatus: importJobStatus
+) {
+
+    const groupId = slugify(g.groupName);
+    const parentRef = jobStatus.db?.doc(`organizations/${jobStatus.orgId}/exposureGroups/${groupId}`);
+    const incoming: SampleInfo[] = (g.samples || []).map(sanitizeIncomingSampleInfo) as SampleInfo[];
+    jobStatus.rowsWritten += incoming.length;
+    try {
+        const txResult = await jobStatus.db?.runTransaction(async (tx: any) => {
+            const snap = await tx.get(parentRef);
+            const data = snap.exists ? ((snap.data() || {}) as any) : {};
+            const existingResults: SampleInfo[] = Array.isArray(data.Results) ? (data.Results as any[]) : [];
+
+
+            const existingNorm = (existingResults || []).map(r => normalizeResults(r, jobStatus.jobId, g, true));
+            const incomingNorm = (incoming || []).map(r => normalizeResults(r, jobStatus.jobId, g, false));
+
+            const { changedAgents, unchangedKeyTWA } = checkForChangedAgents(existingNorm, incomingNorm);
+
+            const noKeyIncomingAgents = collectNoKeyAgents(incomingNorm);
+            const noKeyExistingAgents = collectNoKeyAgents(existingNorm);
+            for (const agentKey of noKeyIncomingAgents) changedAgents.add(agentKey);
+            for (const agentKey of noKeyExistingAgents) changedAgents.add(agentKey);
+
+            // Build map keyed by SampleNumber for replacement, and collect no-key entries separately
+            const byCompoundKey = new Map<string, any>();
+            const noKey: any[] = [];
+            const replaced: Record<string, any> = {};
+
+            for (const r of existingNorm) {
+                const keyInfo = getRowKeyVariants(r);
+                if (!keyInfo.compound) {
+                    noKey.push(r);
+                } else {
+                    byCompoundKey.set(keyInfo.compound, r);
+                }
+            }
+
+            for (const r of incomingNorm) {
+                const keyInfo = getRowKeyVariants(r);
+                if (!keyInfo.compound) {
+                    // No key available; append as a distinct row
+                    noKey.push(r);
+                } else {
+                    // Replace or add
+                    const key = keyInfo.compound;
+                    const prev = byCompoundKey.get(key);
+                    if (prev) {
+                        // Track previous row so we can restore on undo
+                        replaced[key] = prev;
+                        const prevKeyInfo = getRowKeyVariants(prev);
+                        if (prevKeyInfo.sample && !replaced[prevKeyInfo.sample]) {
+                            replaced[prevKeyInfo.sample] = prev;
+                        }
+                    }
+                    byCompoundKey.set(key, r);
+                }
+            }
+
+            const mergedUnique = [...byCompoundKey.values(), ...noKey];
+            const sorted = mergedUnique.sort((a, b) => parseDateToEpoch(b.SampleDate) - parseDateToEpoch(a.SampleDate));
+            const limited = sorted.slice(0, 30);
+            // Prepare preview regardless; EF may be reused if inputs are unchanged
+            const mostRecent = getMostRecentSamples(limited as any, 6);
+            const nowTs = Timestamp.now();
+            const prevLatestByAgent = normalizeLatestMap(data?.LatestExceedanceFractionByAgent);
+            const hasPrevAgentSnapshots = Object.keys(prevLatestByAgent).length > 0;
+            const oelChanged = hasOELChanged(hasPrevAgentSnapshots, prevLatestByAgent, agentsList);
+            const shouldSkipEf = unchangedKeyTWA && hasPrevAgentSnapshots && changedAgents.size === 0 && !oelChanged;
+            const prevTopCompact = compactEfSnapshot(data?.LatestExceedanceFraction);
+            const auditBefore = {
+                results: summarizeResultsForAudit(existingNorm as any),
+                latestByAgent: compactLatestMapForAudit(prevLatestByAgent),
+                latest: prevTopCompact,
+            };
+            if (shouldSkipEf && data?.LatestExceedanceFraction) {
+                // Skip EF recompute/history if inputs unchanged; still update Results & Preview
+                const payload: any = {
+                    OrganizationUid: jobStatus.orgId,
+                    OrganizationName: organizationName || null,
+                    Group: g.groupName,
+                    ExposureGroup: g.groupName,
+                    Results: limited,
+                    ResultsPreview: mostRecent,
+                    ResultsTotalCount: limited.length,
+                    updatedAt: nowTs,
+                    updatedBy: jobStatus.uid,
+                };
+                if (!snap.exists) {
+                    payload.createdAt = nowTs;
+                    payload.createdBy = jobStatus.uid;
+                }
+                tx.set(parentRef, payload, { merge: true });
+                const audit: AuditLogRecord = {
+                    type: 'bulk-import',
+                    at: nowTs,
+                    actorUid: jobStatus.uid,
+                    groupId,
+                    jobId: jobStatus.jobId,
+                    metadata: {
+                        skippedEf: true,
+                        totalResultsBefore: existingNorm.length,
+                        totalResultsAfter: mergedUnique.length,
+                        changedAgents: Array.from(changedAgents),
+                        replacedKeys: Object.keys(replaced),
+                    },
+                    before: auditBefore,
+                    after: {
+                        results: summarizeResultsForAudit(limited as any),
+                        latestByAgent: compactLatestMapForAudit(prevLatestByAgent),
+                        latest: prevTopCompact,
+                    },
+                };
+                // No org summary entry necessary; no EF change
+                return { entry: null, patch: { groupId, replaced }, audit };
+            } else {
+                const agentEfState = computeAgentEfState(limited as any, data?.LatestExceedanceFractionByAgent, data?.ExceedanceFractionHistoryByAgent, agentsList);
+                let topSnapshot = agentEfState.topSnapshot;
+                if (!topSnapshot) {
+                    const fallbackMostRecent = getMostRecentSamples(limited as any, 6);
+                    const fallbackTwa = fallbackMostRecent.map(r => Number(r.TWA)).filter(n => n > 0);
+                    const fallbackAgent = new Agent({
+                        Name: 'Unknown',
+                        OELNumber: 0.05,
+                    });
+                    const fallback = createExceedanceFraction(
+                        (fallbackTwa.length >= 2) ? calculateExceedanceProbability(fallbackTwa, fallbackAgent.OELNumber) : 0,
+                        fallbackMostRecent as any,
+                        fallbackTwa,
+                        fallbackAgent
+                    ) as AgentEfSnapshot;
+                    fallback.AgentKey = fallback.AgentKey || 'unknown';
+                    fallback.AgentName = fallback.AgentName || 'Unknown';
+                    topSnapshot = fallback;
+                }
+                const newTopCompact = compactEfSnapshot(topSnapshot);
+                const topChanged = !deepEqual(prevTopCompact, newTopCompact);
+                const byAgentSummary = Object.fromEntries(Object.entries(agentEfState.latestByAgent).map(([key, snap]) => [key, {
+                    Agent: snap.AgentName,
+                    AgentKey: snap.AgentKey,
+                    ExceedanceFraction: snap.ExceedanceFraction,
+                    DateCalculated: snap.DateCalculated,
+                    SamplesUsedCount: snap.MostRecentNumber,
+                }]));
+                const prevEfVal = prevTopCompact?.ExceedanceFraction ?? null;
+                const payload: any = {
+                    OrganizationUid: jobStatus.orgId,
+                    OrganizationName: organizationName || null,
+                    Group: g.groupName,
+                    ExposureGroup: g.groupName,
+                    Results: limited,
+                    ResultsPreview: mostRecent,
+                    ResultsTotalCount: limited.length,
+                    updatedAt: nowTs,
+                    updatedBy: jobStatus.uid,
+                    LatestExceedanceFractionByAgent: agentEfState.latestByAgent,
+                    ExceedanceFractionHistoryByAgent: agentEfState.historyByAgent,
+                };
+                if (topSnapshot && (topChanged || !data?.LatestExceedanceFraction)) {
+                    payload.LatestExceedanceFraction = topSnapshot;
+                    payload.ExceedanceFractionHistory = FieldValue.arrayUnion(topSnapshot as any);
+                    payload.EFComputedAt = nowTs;
+                }
+                if (!payload.ExceedanceFractionHistory && data?.ExceedanceFractionHistory) {
+                    payload.ExceedanceFractionHistory = data.ExceedanceFractionHistory;
+                }
+                if (!snap.exists) {
+                    payload.createdAt = nowTs;
+                    payload.createdBy = jobStatus.uid;
+                }
+                tx.set(parentRef, payload, { merge: true });
+                // Build summary entry for org-level EfSummary map
+                const entry = topSnapshot ? {
+                    GroupId: groupId,
+                    ExposureGroup: g.groupName,
+                    ExceedanceFraction: topSnapshot.ExceedanceFraction,
+                    PreviousExceedanceFraction: prevEfVal,
+                    Agent: topSnapshot.AgentName ?? null,
+                    AgentKey: topSnapshot.AgentKey ?? null,
+                    OELNumber: topSnapshot.OELNumber,
+                    DateCalculated: topSnapshot.DateCalculated,
+                    SamplesUsedCount: topSnapshot.MostRecentNumber,
+                    ByAgent: byAgentSummary,
+                } : null;
+                // Return both entry and undo metadata for this group
+                const audit: AuditLogRecord = {
+                    type: 'bulk-import',
+                    at: nowTs,
+                    actorUid: jobStatus.uid,
+                    groupId,
+                    jobId: jobStatus.jobId,
+                    metadata: {
+                        skippedEf: false,
+                        totalResultsBefore: existingNorm.length,
+                        totalResultsAfter: mergedUnique.length,
+                        changedAgents: Array.from(changedAgents),
+                        replacedKeys: Object.keys(replaced),
+                        previousEf: prevTopCompact?.ExceedanceFraction ?? null,
+                        newEf: topSnapshot?.ExceedanceFraction ?? null,
+                    },
+                    before: auditBefore,
+                    after: {
+                        results: summarizeResultsForAudit(limited as any),
+                        latestByAgent: compactLatestMapForAudit(agentEfState.latestByAgent),
+                        latest: newTopCompact,
+                    },
+                };
+                return { entry, patch: { groupId, replaced }, audit };
+            }
+        });
+        // Stage for a single org doc update after loop
+        if (txResult?.entry) {
+            jobStatus.orgSummaryUpdate[`EfSummary.${groupId}`] = txResult.entry;
+        }
+        if (txResult?.patch) {
+            jobStatus.undoGroups[groupId] = txResult.patch;
+        }
+        if (txResult?.audit) {
+            jobStatus.auditEntries.push(txResult.audit);
+        }
+    } catch (e: any) {
+        jobStatus.failuresCount += 1;
+        logger.error('bulkImportResults merge/write failed', { group: g.groupName, error: e?.message || String(e) });
+    }
+    return jobStatus;
+}
+
+
+/**
+ * This method collects agent keys from rows that lack SampleNumber,
+ * since these cannot be matched/replaced and must be treated as new entries.
+ * 
+ * @param arr 
+ * @returns 
+ */
+function collectNoKeyAgents(arr: SampleInfo[]) {
+    const set = new Set<string>();
+    for (const r of (arr || [])) {
+        const { sample, agentKey } = getRowKeyVariants(r);
+        if (sample !== null) continue;
+        if (agentKey) set.add(agentKey);
+    }
+    return set;
+};
+
+
+/**
+ * This method compares existing and 
+ * incoming normalized results to 
+ * identify agents with changed TWA values or 
+ * additions/removals.
+ * @param existingNorm 
+ * @param incomingNorm 
+ * @returns 
+ */
+function checkForChangedAgents(existingNorm: ImportSampleInfo[], incomingNorm: ImportSampleInfo[]) {
+    const prevMap = toKeySignatureMap(existingNorm);
+    const nextMap = toKeySignatureMap(incomingNorm);
+    const unchangedKeyTWA = mapsEqual(prevMap, nextMap);
+
+    const changedAgents = new Set<string>();
+    const unionKeys = new Set<string>([...prevMap.keys(), ...nextMap.keys()]);
+    for (const key of unionKeys) {
+        const before = prevMap.get(key);
+        const after = nextMap.get(key);
+        if (!before && after) {
+            if (after.agentKey) changedAgents.add(after.agentKey);
+            continue;
+        }
+        if (before && !after) {
+            if (before.agentKey) changedAgents.add(before.agentKey);
+            continue;
+        }
+        if (!before || !after) continue;
+        const twaChanged = !((before.twa === null && after.twa === null) || (before.twa !== null && after.twa !== null && almostEqual(before.twa, after.twa)));
+        const agentChanged = (before.agentKey || '') !== (after.agentKey || '');
+        if (twaChanged || agentChanged) {
+            if (before.agentKey) changedAgents.add(before.agentKey);
+            if (after.agentKey) changedAgents.add(after.agentKey);
+        }
+    }
+    return { changedAgents, unchangedKeyTWA };
+}
+
+function sanitizeIncomingSampleInfo(r: IncomingSampleInfo): IncomingSampleInfo {
+    const sampleNumber = r?.SampleNumber;
+    const twaRaw = r?.TWA;
+    const twa = (twaRaw === '' || twaRaw === undefined || twaRaw === null) ? null : Number(twaRaw);
+    const agentRaw = typeof r?.Agent === 'string' ? r.Agent.trim() : '';
+    const agentKey = normalizeAgent(agentRaw).key;
+    return {
+        Location: r?.Location ?? "",
+        SampleNumber: (sampleNumber === undefined || sampleNumber === '') ? null : sampleNumber,
+        SampleDate: r?.SampleDate ?? "",
+        ExposureGroup: r?.ExposureGroup ?? "",
+        Agent: agentRaw,
+        AgentKey: agentKey,
+        TWA: twa,
+        Notes: r?.Notes ?? "",
+    } as IncomingSampleInfo;
+}
+
+function getIdForJob(providedJobId: any, providedImportId: any) {
+    return ((): string => {
+        const incoming = providedJobId || providedImportId; // support either name from client
+        if (incoming && typeof incoming === 'string' && incoming.trim()) return incoming.trim();
+        return `job_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    })();
+}
+
 function hasOELChanged(hasPrevAgentSnapshots: boolean, prevLatestByAgent: Record<string, AgentEfSnapshot>, agentsList: Agent[]) {
     return (() => {
         if (!hasPrevAgentSnapshots) return false;
@@ -584,27 +658,8 @@ function normalizeAgent(raw: string | null | undefined): AgentNormalization {
     return { key: slugifyAgent(value), name: value };
 }
 
-function normalizeSampleNumber(value: any): string | null {
-    if (value === undefined || value === null) return null;
-    const str = String(value).trim();
-    return str ? str : null;
-}
 
-function resolveAgentKeyFromResult(result: any): string {
-    const keyRaw = typeof result?.AgentKey === 'string' ? result.AgentKey.trim() : '';
-    if (keyRaw) return slugifyAgent(keyRaw);
-    return normalizeAgent(result?.Agent).key;
-}
 
-function getRowKeyVariants(result: any): { sample: string | null; compound: string | null; agentKey: string } {
-    const sample = normalizeSampleNumber(result?.SampleNumber);
-    const agentKey = resolveAgentKeyFromResult(result);
-    return {
-        sample,
-        agentKey,
-        compound: sample ? `${sample}::${agentKey}` : null,
-    };
-}
 
 function compactResults(results: SampleInfo[] | undefined): any[] {
     if (!Array.isArray(results)) return [];
@@ -842,7 +897,7 @@ function undoImportsAndRespectExisting(
     const keep: any[] = [];
     const seenKeys = new Set<string>();
     let removedCount = 0;
-    const normalize = (r: any): SampleInfo => ({
+    const normalize = (r: any): SampleInfo => (new SampleInfo({
         Location: r?.Location ?? "",
         SampleNumber: (r?.SampleNumber === undefined || r?.SampleNumber === '') ? null : r?.SampleNumber,
         SampleDate: r?.SampleDate ?? "",
@@ -852,7 +907,8 @@ function undoImportsAndRespectExisting(
         TWA: (r?.TWA === '' || r?.TWA === undefined || r?.TWA === null) ? null : Number(r?.TWA),
         Notes: r?.Notes ?? "",
         ImportJobId: r?.ImportJobId ?? null,
-    } as SampleInfo);
+        Group: "",
+    } as SampleInfo));
     const normalizedBefore = eGResults.map(normalize);
     findExistingResults(eGResults, (result: any) => getRowKeyVariants(result), jobId, replacedMap, keep, seenKeys, (dropped: boolean) => { if (dropped) removedCount += 1; });
     // Restore replaced rows
@@ -1169,6 +1225,7 @@ export const removeAgentsFromExposureGroups = onCall(async (request) => {
                         TWA: (r?.TWA === '' || r?.TWA === undefined || r?.TWA === null) ? null : Number(r?.TWA),
                         Notes: r?.Notes ?? "",
                         ImportJobId: r?.ImportJobId ?? null,
+                        Group: "",
                     })) as SampleInfo[];
                     const filtered = normalized.filter(r => {
                         const key = r?.AgentKey || normalizeAgent(r?.Agent).key;
