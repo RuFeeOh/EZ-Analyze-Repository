@@ -54,11 +54,57 @@ firebase deploy --only hosting
 
 **Deployment Time:** 2-5 minutes
 
-### 3. Run Backfill (Production Data)
+### 3. Automatic Backfill
 
-⚠️ **IMPORTANT:** Test the backfill on a single organization first!
+**Good news!** The backfill now runs automatically via a scheduled Cloud Function.
 
-#### 3.1. Test on One Organization (Dry Run)
+#### 3.1. Immediate Trigger (Recommended)
+
+To backfill all organizations immediately after deployment:
+
+```bash
+# Using Firebase CLI
+firebase functions:call triggerAutoBackfill
+```
+
+Or call the function from your application or Firebase Console:
+
+```javascript
+// From your app or Admin SDK
+const result = await functions.httpsCallable('triggerAutoBackfill')();
+console.log(result.data);
+```
+
+This will:
+- Process all organizations
+- Skip organizations already backfilled
+- Skip organizations with no exposure groups
+- Return a detailed status for each organization
+
+**Expected Output:**
+```javascript
+{
+  ok: true,
+  totalOrgs: 5,
+  results: [
+    { orgId: "org1", status: "success" },
+    { orgId: "org2", status: "skipped", reason: "already-backfilled" },
+    { orgId: "org3", status: "success" },
+    // ...
+  ]
+}
+```
+
+#### 3.2. Scheduled Automatic Backfill
+
+The `autoBackfillPlantJob` function runs automatically every day at 2 AM UTC. This ensures:
+- New organizations get backfilled automatically
+- No manual intervention needed
+- Organizations are only processed once (checks for existing backfill status)
+
+#### 3.3. Manual Testing on Individual Organization (Optional)
+
+If you want to test the backfill on a single organization first:
 
 ```javascript
 // In Firebase Console > Functions > backfillPlantJobData > Test
@@ -76,77 +122,11 @@ Review the response:
 - Review error messages if any
 - Verify `message` indicates expected behavior
 
-#### 3.2. Run Actual Backfill on Test Org
-
-```javascript
-{
-  "orgId": "test-org-id",
-  "dryRun": false
-}
-```
-
 **Verify:**
 1. Check a few exposure groups in Firestore Console
 2. Verify `plantName`, `jobName`, `plantKey`, `jobKey` fields are populated
 3. Check `plantJobNeedsReview` flags
 4. Verify `organizations/{orgId}/plantJobBackfillStatus/latest` document exists
-
-#### 3.3. Run Backfill on All Organizations
-
-**Option A: Using Firebase Console**
-
-For each organization:
-1. Go to Firebase Console > Functions
-2. Select `backfillPlantJobData`
-3. Click "Test"
-4. Enter payload: `{ "orgId": "org-id-here", "dryRun": false }`
-5. Review results
-
-**Option B: Using a Script (Recommended for Many Orgs)**
-
-Create a Node.js script:
-
-```javascript
-const admin = require('firebase-admin');
-const functions = require('firebase-functions-test')();
-
-admin.initializeApp();
-const db = admin.firestore();
-
-async function backfillAllOrgs() {
-  // Get all organizations
-  const orgsSnapshot = await db.collection('organizations').get();
-  
-  for (const orgDoc of orgsSnapshot.docs) {
-    const orgId = orgDoc.id;
-    console.log(`Processing org: ${orgId}`);
-    
-    try {
-      // Call the backfill function
-      const result = await admin.functions().httpsCallable('backfillPlantJobData')({
-        orgId,
-        dryRun: false
-      });
-      
-      console.log(`  Success: ${result.data.updatedCount} updated, ${result.data.flaggedForReviewCount} flagged`);
-    } catch (error) {
-      console.error(`  Error: ${error.message}`);
-    }
-    
-    // Add delay to avoid overwhelming Firestore
-    await new Promise(resolve => setTimeout(resolve, 2000));
-  }
-  
-  console.log('Backfill complete!');
-}
-
-backfillAllOrgs();
-```
-
-Run with:
-```bash
-node scripts/backfill-all-orgs.js
-```
 
 ### 4. Verify Deployment
 

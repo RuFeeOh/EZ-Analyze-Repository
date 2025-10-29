@@ -85,9 +85,30 @@ The plant and job fields are displayed in:
 
 ## Backfill Process
 
-To apply plant/job extraction to existing exposure groups, use the backfill Cloud Function.
+Plant/job extraction is automatically applied to existing exposure groups through a scheduled Cloud Function.
 
-### Running the Backfill
+### Automatic Backfill
+
+A scheduled Cloud Function (`autoBackfillPlantJob`) runs daily at 2 AM UTC to automatically backfill any organizations that haven't been processed yet. This ensures all existing data gets plant/job extraction without manual intervention.
+
+**What it does:**
+- Checks all organizations
+- Skips organizations that have already been backfilled
+- Processes organizations with exposure groups that lack plant/job data
+- Creates a status document to track completion
+
+### Manual Trigger (Optional)
+
+If you want to trigger the backfill immediately instead of waiting for the scheduled run:
+
+```typescript
+// Trigger backfill for all organizations at once
+const result = await functions.httpsCallable('triggerAutoBackfill')();
+```
+
+### Individual Organization Backfill (Advanced)
+
+For specific organizations or custom processing:
 
 ```typescript
 // In Firebase Console or using Firebase Admin SDK
