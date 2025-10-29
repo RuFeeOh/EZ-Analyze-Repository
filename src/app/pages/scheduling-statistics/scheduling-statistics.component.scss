@@ -4,7 +4,7 @@
   justify-content: space-between;
   padding: 16px;
   border-bottom: 1px solid rgba(0, 0, 0, 0.12);
-  
+
   .left {
     display: flex;
     align-items: center;
@@ -39,7 +39,7 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  
+
   .filter-field {
     min-width: 300px;
   }
@@ -102,8 +102,4 @@
     background-color: #fecaca;
     color: #991b1b;
   }
-}
-
-.spinner-overlay {
-  background: rgba(255, 255, 255, 0.8);
 }
