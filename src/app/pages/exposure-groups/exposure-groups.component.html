@@ -20,8 +20,6 @@
           [items]="groups"
           [summaryColumns]="[
 		{ Name: 'ExposureGroup', DisplayName: 'Exposure Group' },
-		{ Name: 'plantName', DisplayName: 'Plant' },
-		{ Name: 'jobName', DisplayName: 'Job' },
         { Name: 'ResultsTotalCount', DisplayName: 'Samples' }
 	]"
           [detailColumns]="['SampleDate','ExposureGroup','TWA','Notes','SampleNumber']"
@@ -34,13 +32,17 @@
             <ng-container *ngSwitchCase="'plantName'">
                 <span [matTooltip]="item?.plantJobNeedsReview ? 'Needs manual review - low confidence extraction' : ''">
                     {{ value || '-' }}
-                    <mat-icon *ngIf="item?.plantJobNeedsReview" inline style="font-size: 16px; width: 16px; height: 16px; color: orange;">warning</mat-icon>
+                    <mat-icon *ngIf="item?.plantJobNeedsReview"
+                              inline
+                              style="font-size: 16px; width: 16px; height: 16px; color: orange;">warning</mat-icon>
                 </span>
             </ng-container>
             <ng-container *ngSwitchCase="'jobName'">
                 <span [matTooltip]="item?.plantJobNeedsReview ? 'Needs manual review - low confidence extraction' : ''">
                     {{ value || '-' }}
-                    <mat-icon *ngIf="item?.plantJobNeedsReview" inline style="font-size: 16px; width: 16px; height: 16px; color: orange;">warning</mat-icon>
+                    <mat-icon *ngIf="item?.plantJobNeedsReview"
+                              inline
+                              style="font-size: 16px; width: 16px; height: 16px; color: orange;">warning</mat-icon>
                 </span>
             </ng-container>
             <ng-container *ngSwitchCase="'SampleDate'">{{ value | date:'mediumDate' }}</ng-container>

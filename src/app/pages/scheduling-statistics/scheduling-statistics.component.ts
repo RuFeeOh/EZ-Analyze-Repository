@@ -48,15 +48,13 @@ export class SchedulingStatisticsComponent {
 
   // Quick filter by Exposure Group
   filter = signal('');
-  
+
   // Recalculation state
   recalculating = signal(false);
 
   // Table configuration
   readonly schedulingStatsColumns = [
     new EzColumn({ Name: 'ExposureGroup', DisplayName: 'Exposure Group' }),
-    new EzColumn({ Name: 'plantName', DisplayName: 'Plant' }),
-    new EzColumn({ Name: 'jobName', DisplayName: 'Job' }),
     new EzColumn({ Name: 'AIHARating', DisplayName: 'AIHA Rating' }),
     new EzColumn({ Name: 'ExceedanceFraction', DisplayName: 'Exceedance Fraction', Format: 'percent-badge' })
   ];
@@ -89,7 +87,7 @@ export class SchedulingStatisticsComponent {
           return items;
         }
         const filterLower = filterText.toLowerCase().trim();
-        return items.filter(item => 
+        return items.filter(item =>
           String(item?.ExposureGroup ?? '').toLowerCase().includes(filterLower)
         );
       })
@@ -107,22 +105,22 @@ export class SchedulingStatisticsComponent {
 
       // Check for multi-agent structure (LatestExceedanceFractionByAgent)
       const latestByAgent = group?.LatestExceedanceFractionByAgent;
-      
+
       if (latestByAgent && typeof latestByAgent === 'object' && Object.keys(latestByAgent).length > 0) {
         // Multi-agent structure
         for (const [agentKey, snapshot] of Object.entries(latestByAgent)) {
           if (!snapshot || typeof snapshot !== 'object') continue;
 
-          const exceedanceFraction = typeof (snapshot as any).ExceedanceFraction === 'number' 
-            ? (snapshot as any).ExceedanceFraction 
+          const exceedanceFraction = typeof (snapshot as any).ExceedanceFraction === 'number'
+            ? (snapshot as any).ExceedanceFraction
             : null;
 
-          const resultsUsed = Array.isArray((snapshot as any).ResultsUsed) 
-            ? (snapshot as any).ResultsUsed 
+          const resultsUsed = Array.isArray((snapshot as any).ResultsUsed)
+            ? (snapshot as any).ResultsUsed
             : [];
 
-          const oel = typeof (snapshot as any).OELNumber === 'number' 
-            ? (snapshot as any).OELNumber 
+          const oel = typeof (snapshot as any).OELNumber === 'number'
+            ? (snapshot as any).OELNumber
             : 0.05;
 
           const agentName = (snapshot as any).AgentName || agentKey;
@@ -156,12 +154,12 @@ export class SchedulingStatisticsComponent {
         const latest = group?.LatestExceedanceFraction;
         if (!latest) continue;
 
-        const exceedanceFraction = typeof latest.ExceedanceFraction === 'number' 
-          ? latest.ExceedanceFraction 
+        const exceedanceFraction = typeof latest.ExceedanceFraction === 'number'
+          ? latest.ExceedanceFraction
           : null;
 
-        const resultsUsed = Array.isArray(latest.ResultsUsed) 
-          ? latest.ResultsUsed 
+        const resultsUsed = Array.isArray(latest.ResultsUsed)
+          ? latest.ResultsUsed
           : [];
 
         const oel = typeof latest.OELNumber === 'number' ? latest.OELNumber : 0.05;
@@ -252,7 +250,7 @@ export class SchedulingStatisticsComponent {
     // Calculate 95th percentile using lognormal distribution
     const logMeasurements = measurements.map((x: number) => Math.log(x));
     const mean = logMeasurements.reduce((sum: number, val: number) => sum + val, 0) / logMeasurements.length;
-    const variance = logMeasurements.reduce((sum: number, val: number) => sum + Math.pow(val - mean, 2), 0) / 
+    const variance = logMeasurements.reduce((sum: number, val: number) => sum + Math.pow(val - mean, 2), 0) /
       (logMeasurements.length - 1);
     const stdDev = Math.sqrt(variance);
 
@@ -319,13 +317,13 @@ export class SchedulingStatisticsComponent {
         this.fns,
         'addAIHARatingsRetroactively'
       );
-      
+
       const result = await callable({ orgId });
-      
+
       if (result.data?.ok) {
         alert(`Successfully recalculated AIHA ratings for ${result.data.processedCount} exposure group(s).`);
       } else {
-        const errorMsg = result.data?.errors?.length 
+        const errorMsg = result.data?.errors?.length
           ? `Completed with ${result.data.errorCount} error(s). First error: ${result.data.errors[0]}`
           : 'Recalculation completed with some errors.';
         alert(errorMsg);
