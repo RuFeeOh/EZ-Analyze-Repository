@@ -1,0 +1,93 @@
+.scheduling-stats-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.12);
+  
+  .left {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+
+    h2 {
+      margin: 0;
+      font-size: 20px;
+      font-weight: 500;
+    }
+  }
+}
+
+.scheduling-stats-actions {
+  padding: 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  
+  .filter-field {
+    min-width: 300px;
+  }
+}
+
+.table-wrapper {
+  padding: 0 16px 16px;
+}
+
+.aiha-badge {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 12px;
+  font-weight: 500;
+  font-size: 13px;
+  text-align: center;
+  min-width: 80px;
+
+  &.aiha-1 {
+    background-color: #dcfce7;
+    color: #166534;
+  }
+
+  &.aiha-2 {
+    background-color: #fef9c3;
+    color: #854d0e;
+  }
+
+  &.aiha-3 {
+    background-color: #fed7aa;
+    color: #9a3412;
+  }
+
+  &.aiha-4 {
+    background-color: #fecaca;
+    color: #991b1b;
+  }
+}
+
+.ef-badge {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 12px;
+  font-weight: 500;
+  font-size: 13px;
+  text-align: center;
+  min-width: 60px;
+
+  &.ef-good {
+    background-color: #dcfce7;
+    color: #166534;
+  }
+
+  &.ef-warn {
+    background-color: #fef9c3;
+    color: #854d0e;
+  }
+
+  &.ef-bad {
+    background-color: #fecaca;
+    color: #991b1b;
+  }
+}
+
+.spinner-overlay {
+  background: rgba(255, 255, 255, 0.8);
+}

@@ -53,6 +53,10 @@
             *ngIf="organizationService.orgStore.currentOrg()?.Name"
             routerLink="/agents"
             routerLinkActive="mdc-list-item--activated">Agents</a>
+         <a mat-list-item
+            *ngIf="organizationService.orgStore.currentOrg()?.Name"
+            routerLink="/scheduling-statistics"
+            routerLinkActive="mdc-list-item--activated">Scheduling Statistics</a>
       </mat-nav-list>
    </mat-drawer>
    <mat-drawer-content>

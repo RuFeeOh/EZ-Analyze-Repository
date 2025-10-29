@@ -5,6 +5,7 @@ import { OrganizationSelectorComponent } from './pages/organization-selector/org
 import { ExceedanceFractionComponent } from './pages/exceedance-fraction/exceedance-fraction.component';
 import { ExposureGroupsComponent } from './pages/exposure-groups/exposure-groups.component';
 import { AgentsComponent } from './pages/agents/agents.component';
+import { SchedulingStatisticsComponent } from './pages/scheduling-statistics/scheduling-statistics.component';
 
 export const routes: Routes = [
     {
@@ -38,5 +39,10 @@ export const routes: Routes = [
         path: 'agents',
         title: 'Agents',
         component: AgentsComponent,
+    },
+    {
+        path: 'scheduling-statistics',
+        title: 'Scheduling Statistics',
+        component: SchedulingStatisticsComponent,
     }
 ];
