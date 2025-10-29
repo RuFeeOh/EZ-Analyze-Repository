@@ -6,6 +6,7 @@ import { ExceedanceFraction } from "../models/exceedance-fraction.model";
 import { SampleInfo } from "../models/sample-info.model";
 import { slugifyAgent } from "./agent";
 import { compactResults } from "./results";
+import { calculate95thPercentile, calculateAIHARating } from "./aiha-rating";
 
 // Exceedance Fraction calculation (same as client service)
 function normalCDF(x: number) {
@@ -41,6 +42,11 @@ export function createExceedanceFraction(
     TWAlist: number[],
     agent: Agent
 ): ExceedanceFraction {
+    // Calculate AIHA rating
+    const ninetyFifthPercentile = TWAlist.length > 0 ? calculate95thPercentile(TWAlist) : 0;
+    const aihaRatio = agent.OELNumber > 0 ? ninetyFifthPercentile / agent.OELNumber : 0;
+    const aihaRating = calculateAIHARating(ninetyFifthPercentile, agent.OELNumber);
+
     return {
         ExceedanceFraction: exceedanceFraction,
         DateCalculated: new Date().toISOString(),
@@ -49,6 +55,9 @@ export function createExceedanceFraction(
         ResultsUsed: resultsUsed,
         AgentKey: slugifyAgent(agent.Name),
         AgentName: agent.Name,
+        AIHARating: aihaRating,
+        NinetyFifthPercentile: ninetyFifthPercentile,
+        AIHARatio: aihaRatio,
     };
 }
 
@@ -61,5 +70,8 @@ export function compactEfSnapshot(snapshot: any) {
         AgentKey: snapshot.AgentKey ?? null,
         AgentName: snapshot.AgentName ?? null,
         Results: compactResults(snapshot.ResultsUsed),
+        AIHARating: typeof snapshot.AIHARating === 'number' ? snapshot.AIHARating : null,
+        NinetyFifthPercentile: typeof snapshot.NinetyFifthPercentile === 'number' ? snapshot.NinetyFifthPercentile : null,
+        AIHARatio: typeof snapshot.AIHARatio === 'number' ? snapshot.AIHARatio : null,
     };
 }

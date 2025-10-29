@@ -1,0 +1,104 @@
+<div class="scheduling-stats-toolbar">
+  <div class="left">
+    <h2>Scheduling Statistics</h2>
+  </div>
+  <div class="right">
+    <button
+      mat-flat-button
+      color="primary"
+      type="button"
+      (click)="recalculateAIHARatings()"
+      [disabled]="recalculating()"
+      matTooltip="Recalculate AIHA ratings for all exposure groups"
+    >
+      <span class="btn-content">
+        <mat-icon *ngIf="!recalculating()">refresh</mat-icon>
+        <mat-progress-spinner
+          *ngIf="recalculating()"
+          class="btn-spinner"
+          mode="indeterminate"
+          diameter="20"
+          strokeWidth="3"
+        ></mat-progress-spinner>
+        <span class="btn-label">{{ recalculating() ? 'Recalculating...' : 'Recalculate AIHA Ratings' }}</span>
+      </span>
+    </button>
+  </div>
+</div>
+
+<div class="scheduling-stats-actions">
+  <mat-form-field appearance="outline" class="filter-field">
+    <mat-icon matPrefix>search</mat-icon>
+    <input
+      matInput
+      placeholder="Filter by Exposure Group"
+      [value]="filter()"
+      (input)="filter.set(($any($event.target).value || ''))"
+    />
+    <button
+      mat-icon-button
+      class="compact"
+      matSuffix
+      type="button"
+      *ngIf="filter()"
+      aria-label="Clear filter"
+      (click)="clearFilter()"
+    >
+      <mat-icon>close</mat-icon>
+    </button>
+  </mat-form-field>
+</div>
+
+@let statsItems = (filteredItems$ | async);
+
+<div class="table-wrapper" style="position:relative;">
+  @if (!statsItems) {
+  <div
+    class="spinner-overlay"
+    style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; z-index: 2;"
+  >
+    <mat-progress-spinner mode="indeterminate" diameter="48"></mat-progress-spinner>
+  </div>
+  }
+
+  <ez-table
+    [items]="statsItems ?? []"
+    [summaryColumns]="schedulingStatsColumns"
+    [detailColumns]="detailColumns"
+    [detailFor]="detailForItem"
+    [filterText]="filter()"
+    filterKey="ExposureGroup"
+    defaultSortActive="ExposureGroup"
+    defaultSortDirection="asc"
+  >
+    <ng-template #cell let-item let-col="column" let-id="id" let-value="value">
+      <ng-container [ngSwitch]="id">
+        <ng-container *ngSwitchCase="'AIHARating'">
+          <span
+            class="aiha-badge"
+            [class.aiha-1]="value === 1"
+            [class.aiha-2]="value === 2"
+            [class.aiha-3]="value === 3"
+            [class.aiha-4]="value === 4"
+            [matTooltip]="'95th Percentile: ' + (item?.NinetyFifthPercentile | number:'1.3-3') + ' | Ratio: ' + ((item?.Ratio ?? 0) | percent:'1.1-1')"
+          >
+            {{ item?.AIHARatingText || 'N/A' }}
+          </span>
+        </ng-container>
+        <ng-container *ngSwitchCase="'ExceedanceFraction'">
+          <span
+            class="ef-badge"
+            [class.ef-good]="(value ?? 0) < 0.05"
+            [class.ef-warn]="(value ?? 0) >= 0.05 && (value ?? 0) < 0.2"
+            [class.ef-bad]="(value ?? 0) >= 0.2"
+          >
+            {{ (value ?? 0) | percent:'1.1-1' }}
+          </span>
+        </ng-container>
+        <ng-container *ngSwitchCase="'SampleDate'">{{ value | date:'mediumDate' }}</ng-container>
+        <ng-container *ngSwitchCase="'TWA'">{{ value | number:'1.3-3' }}</ng-container>
+        <ng-container *ngSwitchDefault>{{ value }}</ng-container>
+      </ng-container>
+    </ng-template>
+  </ez-table>
+</div>
