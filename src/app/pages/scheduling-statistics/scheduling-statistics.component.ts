@@ -55,6 +55,8 @@ export class SchedulingStatisticsComponent {
   // Table configuration
   readonly schedulingStatsColumns = [
     new EzColumn({ Name: 'ExposureGroup', DisplayName: 'Exposure Group' }),
+    new EzColumn({ Name: 'plantName', DisplayName: 'Plant' }),
+    new EzColumn({ Name: 'jobName', DisplayName: 'Job' }),
     new EzColumn({ Name: 'AIHARating', DisplayName: 'AIHA Rating' }),
     new EzColumn({ Name: 'ExceedanceFraction', DisplayName: 'Exceedance Fraction', Format: 'percent-badge' })
   ];
@@ -133,6 +135,9 @@ export class SchedulingStatisticsComponent {
 
           items.push({
             ExposureGroup: name,
+            plantName: group?.plantName || '',
+            jobName: group?.jobName || '',
+            plantJobNeedsReview: group?.plantJobNeedsReview || false,
             Agent: agentName,
             AgentKey: agentKey,
             AIHARating: aihaRating.rating,
@@ -171,6 +176,9 @@ export class SchedulingStatisticsComponent {
 
         items.push({
           ExposureGroup: name,
+          plantName: group?.plantName || '',
+          jobName: group?.jobName || '',
+          plantJobNeedsReview: group?.plantJobNeedsReview || false,
           Agent: agentName,
           AgentKey: this.slugifyAgent(agentName),
           AIHARating: aihaRating.rating,

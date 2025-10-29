@@ -2,6 +2,11 @@ export class ExceedanceFractionSummary {
 
     GroupId: string = ""
     ExposureGroup: string = ""
+    plantName?: string
+    jobName?: string
+    plantKey?: string
+    jobKey?: string
+    plantJobNeedsReview?: boolean
     ExceedanceFraction: number = 0
     PrevExceedanceFraction: number = 0
     Agent: string = ""

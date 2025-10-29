@@ -34,6 +34,21 @@ The exceedance fraction page will show all the exceedance fractions for all the 
 
 This agent page will allow user to CRUD agents. Agents will consist of a Name and OEL. There will be a grid with the Agents, OEL, and the count of ExpsoureGroups using the Agent. Each agent row will expand to show the exposure groups which use the agent. When calculating an exceedance fraction, the Agent should be looked up and, if not found, ask the user what the OEL for this new agent should be then the OEL from the agent should be used to calculate the Exceedance Fraction.
 
+## Plant/Job Extraction
+
+The application automatically extracts plant and job information from exposure group names for better organization and filtering. See [PLANT-JOB-EXTRACTION.md](PLANT-JOB-EXTRACTION.md) for detailed documentation on:
+
+- How extraction works (dash separation, stop words, job terms, etc.)
+- Confidence scoring and review flags
+- Running the backfill process for existing data
+- Best practices for naming exposure groups
+
+**Quick Example:**
+- Input: `"Fort Smith - Bagging"`
+- Output: Plant: `"Fort Smith"`, Job: `"Bagging"`
+
+All new imports automatically extract plant/job data. For existing data, use the `backfillPlantJobData` Cloud Function.
+
 ## Privacy and sharing
 
 Users will be able to create an organization. This organizaiton will be scoped to themselves but they will also be able to share organizations with other users. In order to share an organization the user will navigate to the org page, select share on an org, and then type in the email of the person they'd like to share with. By default users will see all exposureGroups in the selected organiation even if it is shared. The user who owns an organization will be able to mark exposureGroups as private if they'd like to keep it private. By default all of them are shared.

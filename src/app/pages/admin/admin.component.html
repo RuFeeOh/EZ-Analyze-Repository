@@ -1,0 +1,126 @@
+<div class="admin-page">
+  <div class="page-header">
+    <h1>Admin Functions</h1>
+    <p class="page-description">
+      Administrative functions for managing the application
+    </p>
+  </div>
+
+  <div class="admin-sections">
+    <!-- Plant/Job Backfill Section -->
+    <mat-card class="admin-card">
+      <mat-card-header>
+        <mat-card-title>
+          <mat-icon>factory</mat-icon>
+          Plant/Job Extraction Backfill
+        </mat-card-title>
+      </mat-card-header>
+      
+      <mat-card-content>
+        <p class="card-description">
+          Extract plant and job names from all exposure groups in all organizations.
+          This process automatically splits exposure group names like "Fort Smith - Bagging" into:
+        </p>
+        <ul class="feature-list">
+          <li><strong>Plant:</strong> Fort Smith</li>
+          <li><strong>Job:</strong> Bagging</li>
+        </ul>
+        <p class="card-description">
+          Organizations that have already been processed will be automatically skipped.
+        </p>
+
+        <div class="action-area">
+          <button 
+            mat-raised-button 
+            color="primary"
+            [disabled]="backfillRunning()"
+            (click)="triggerBackfill()"
+            matTooltip="Run plant/job extraction for all organizations">
+            <mat-icon *ngIf="!backfillRunning()">play_arrow</mat-icon>
+            <mat-progress-spinner
+              *ngIf="backfillRunning()"
+              mode="indeterminate"
+              diameter="20"
+              strokeWidth="3"
+              class="button-spinner">
+            </mat-progress-spinner>
+            <span class="button-label">
+              {{ backfillRunning() ? 'Running Backfill...' : 'Trigger Backfill' }}
+            </span>
+          </button>
+        </div>
+
+        <!-- Results Display -->
+        @if (backfillResult()) {
+          <div class="results-section">
+            <h3>Results</h3>
+            
+            @if (backfillResult().error) {
+              <div class="error-message">
+                <mat-icon>error</mat-icon>
+                <span>{{ backfillResult().error }}</span>
+              </div>
+            } @else {
+              <div class="results-summary">
+                <div class="stat-card">
+                  <div class="stat-value">{{ backfillResult().totalOrgs || 0 }}</div>
+                  <div class="stat-label">Total Organizations</div>
+                </div>
+                <div class="stat-card success">
+                  <div class="stat-value">
+                    {{ getSuccessCount() }}
+                  </div>
+                  <div class="stat-label">Processed</div>
+                </div>
+                <div class="stat-card info">
+                  <div class="stat-value">
+                    {{ getSkippedCount() }}
+                  </div>
+                  <div class="stat-label">Skipped</div>
+                </div>
+                <div class="stat-card error">
+                  <div class="stat-value">
+                    {{ getErrorCount() }}
+                  </div>
+                  <div class="stat-label">Errors</div>
+                </div>
+              </div>
+
+              <!-- Detailed Results -->
+              @if (backfillResult().results && backfillResult().results.length > 0) {
+                <div class="detailed-results">
+                  <h4>Organization Details</h4>
+                  <div class="results-table">
+                    @for (result of backfillResult().results; track result.orgId) {
+                      <div class="result-row" [class]="'status-' + result.status">
+                        <mat-icon [class]="'status-icon ' + result.status">
+                          {{ getStatusIcon(result.status) }}
+                        </mat-icon>
+                        <div class="result-info">
+                          <div class="org-id">{{ result.orgId }}</div>
+                          @if (result.reason) {
+                            <div class="result-reason">{{ result.reason }}</div>
+                          }
+                          @if (result.error) {
+                            <div class="result-error">{{ result.error }}</div>
+                          }
+                        </div>
+                        <div class="result-status">
+                          <span class="status-badge" [class]="result.status">
+                            {{ result.status }}
+                          </span>
+                        </div>
+                      </div>
+                    }
+                  </div>
+                </div>
+              }
+            }
+          </div>
+        }
+      </mat-card-content>
+    </mat-card>
+
+    <!-- Future admin functions can be added here -->
+  </div>
+</div>

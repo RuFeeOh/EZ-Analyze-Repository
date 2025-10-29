@@ -8,6 +8,11 @@ export class ExposureGroup {
     OrganizationName: string = "";
     Group: string = "";
     ExposureGroup: string = "";
+    plantName?: string;
+    jobName?: string;
+    plantKey?: string;
+    jobKey?: string;
+    plantJobNeedsReview?: boolean;
     LatestExceedanceFraction: ExceedanceFraction | null = null;
     Results: SampleInfo[] = [];
     ExceedanceFractionHistory: ExceedanceFraction[] | null = null;

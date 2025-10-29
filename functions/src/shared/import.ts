@@ -18,7 +18,34 @@ import { ImportSampleInfo } from "../models/import-sample-info.model";
 import { finalizeJobStatus, startJobTracking } from "./job-tracking";
 import { appendAuditRecords, compactLatestMapForAudit } from "./audit";
 import { calculate95thPercentile, calculateAIHARating } from "./aiha-rating";
+import { PlantJobExtractor } from "./plant-job-extraction";
 
+
+/**
+ * Load existing exposure group names for an organization to build plant dictionary
+ */
+async function loadExistingExposureGroupNames(db: admin.firestore.Firestore, orgId: string): Promise<string[]> {
+    try {
+        const snapshot = await db.collection(`organizations/${orgId}/exposureGroups`)
+            .select('ExposureGroup', 'Group')
+            .limit(500)
+            .get();
+        
+        const names: string[] = [];
+        snapshot.forEach(doc => {
+            const data = doc.data();
+            const name = data?.ExposureGroup || data?.Group;
+            if (name && typeof name === 'string') {
+                names.push(name);
+            }
+        });
+        
+        return names;
+    } catch (e) {
+        logger.warn('loadExistingExposureGroupNames: failed to load', { orgId, error: (e as any)?.message || String(e) });
+        return [];
+    }
+}
 
 const timeoutMinute = 4;
 const timeoutSeconds = timeoutMinute * 60;
@@ -45,6 +72,10 @@ export const bulkImportResults = onCall({ timeoutSeconds: timeoutSeconds, memory
     const db = getFirestore();
     const jobId = getIdForJob(providedJobId, providedImportId);
     const jobRef = db.doc(`organizations/${orgId}/importJobs/${jobId}`);
+    
+    // Load existing exposure groups for plant dictionary
+    const existingGroups = await loadExistingExposureGroupNames(db, orgId);
+    const plantJobExtractor = new PlantJobExtractor(existingGroups);
 
     // Initialize job doc on first batch; subsequent batches will just increment counters
     if (trackJob) {
@@ -70,7 +101,8 @@ export const bulkImportResults = onCall({ timeoutSeconds: timeoutSeconds, memory
             g,
             agentsList,
             organizationName,
-            jobStatus
+            jobStatus,
+            plantJobExtractor
         );
     }
 
@@ -282,13 +314,17 @@ async function processIncomingSamples(
     g: SampleGroupIn,
     agentsList: Agent[],
     organizationName: any,
-    jobStatus: importJobStatus
+    jobStatus: importJobStatus,
+    plantJobExtractor: PlantJobExtractor
 ) {
 
     const groupId = slugify(g.groupName);
     const parentRef = jobStatus.db?.doc(`organizations/${jobStatus.orgId}/exposureGroups/${groupId}`);
     const incoming: SampleInfo[] = (g.samples || []).map(sanitizeIncomingSampleInfo) as SampleInfo[];
     jobStatus.rowsWritten += incoming.length;
+    
+    // Extract plant and job from exposure group name
+    const plantJobData = plantJobExtractor.extract(g.groupName);
     try {
         const txResult = await jobStatus.db?.runTransaction(async (tx: any) => {
             const snap = await tx.get(parentRef);
@@ -364,6 +400,11 @@ async function processIncomingSamples(
                     OrganizationName: organizationName || null,
                     Group: g.groupName,
                     ExposureGroup: g.groupName,
+                    plantName: plantJobData.plantName,
+                    jobName: plantJobData.jobName,
+                    plantKey: plantJobData.plantKey,
+                    jobKey: plantJobData.jobKey,
+                    plantJobNeedsReview: plantJobData.plantJobNeedsReview,
                     Results: limited,
                     ResultsPreview: mostRecent,
                     ResultsTotalCount: limited.length,
@@ -371,7 +412,7 @@ async function processIncomingSamples(
                     updatedBy: jobStatus.uid,
                 };
                 if (!snap.exists) {
-                    payload.createdAt = nowTs;
+                    payload.createdAt = nowTs,
                     payload.createdBy = jobStatus.uid;
                 }
                 tx.set(parentRef, payload, { merge: true });
@@ -435,6 +476,11 @@ async function processIncomingSamples(
                     OrganizationName: organizationName || null,
                     Group: g.groupName,
                     ExposureGroup: g.groupName,
+                    plantName: plantJobData.plantName,
+                    jobName: plantJobData.jobName,
+                    plantKey: plantJobData.plantKey,
+                    jobKey: plantJobData.jobKey,
+                    plantJobNeedsReview: plantJobData.plantJobNeedsReview,
                     Results: limited,
                     ResultsPreview: mostRecent,
                     ResultsTotalCount: limited.length,
@@ -460,6 +506,11 @@ async function processIncomingSamples(
                 const entry = topSnapshot ? {
                     GroupId: groupId,
                     ExposureGroup: g.groupName,
+                    plantName: plantJobData.plantName,
+                    jobName: plantJobData.jobName,
+                    plantKey: plantJobData.plantKey,
+                    jobKey: plantJobData.jobKey,
+                    plantJobNeedsReview: plantJobData.plantJobNeedsReview,
                     ExceedanceFraction: topSnapshot.ExceedanceFraction,
                     PreviousExceedanceFraction: prevEfVal,
                     Agent: topSnapshot.AgentName ?? null,
