@@ -124,11 +124,7 @@ export class SchedulingStatisticsComponent {
           const aihaRating = this.calculateAIHARating(resultsUsed, oel);
 
           // Sort and limit results for display
-          const sortedResults = [...resultsUsed].sort((a: any, b: any) => {
-            const dateA = a.SampleDate ? new Date(a.SampleDate).getTime() : 0;
-            const dateB = b.SampleDate ? new Date(b.SampleDate).getTime() : 0;
-            return dateB - dateA; // descending order (most recent first)
-          }).slice(0, 6);
+          const sortedResults = this.sortAndLimitResults(resultsUsed);
 
           items.push({
             ExposureGroup: name,
@@ -166,11 +162,7 @@ export class SchedulingStatisticsComponent {
         const aihaRating = this.calculateAIHARating(resultsUsed, oel);
 
         // Sort and limit results for display
-        const sortedResults = [...resultsUsed].sort((a: any, b: any) => {
-          const dateA = a.SampleDate ? new Date(a.SampleDate).getTime() : 0;
-          const dateB = b.SampleDate ? new Date(b.SampleDate).getTime() : 0;
-          return dateB - dateA; // descending order (most recent first)
-        }).slice(0, 6);
+        const sortedResults = this.sortAndLimitResults(resultsUsed);
 
         items.push({
           ExposureGroup: name,
@@ -190,6 +182,14 @@ export class SchedulingStatisticsComponent {
     }
 
     return items;
+  }
+
+  private sortAndLimitResults(results: any[]): any[] {
+    return [...results].sort((a: any, b: any) => {
+      const dateA = a.SampleDate ? new Date(a.SampleDate).getTime() : 0;
+      const dateB = b.SampleDate ? new Date(b.SampleDate).getTime() : 0;
+      return dateB - dateA; // descending order (most recent first)
+    }).slice(0, 6);
   }
 
   private getAgentNameFromResults(results: any[]): string {
@@ -228,6 +228,14 @@ export class SchedulingStatisticsComponent {
       return { rating: 0, ninetyFifthPercentile: 0, ratio: 0 };
     }
 
+    // If only one measurement, use it as the 95th percentile
+    if (measurements.length === 1) {
+      const ninetyFifthPercentile = measurements[0];
+      const ratio = oel > 0 ? ninetyFifthPercentile / oel : 0;
+      const rating = this.getRatingFromRatio(ratio);
+      return { rating, ninetyFifthPercentile, ratio };
+    }
+
     // Calculate 95th percentile using lognormal distribution
     const logMeasurements = measurements.map((x: number) => Math.log(x));
     const mean = logMeasurements.reduce((sum: number, val: number) => sum + val, 0) / logMeasurements.length;
@@ -244,18 +252,21 @@ export class SchedulingStatisticsComponent {
     const ratio = oel > 0 ? ninetyFifthPercentile / oel : 0;
 
     // Determine AIHA category
-    let rating: number;
-    if (ratio < 0.10) {
-      rating = 1;
-    } else if (ratio < 0.50) {
-      rating = 2;
-    } else if (ratio < 1.00) {
-      rating = 3;
-    } else {
-      rating = 4;
-    }
+    const rating = this.getRatingFromRatio(ratio);
 
     return { rating, ninetyFifthPercentile, ratio };
+  }
+
+  private getRatingFromRatio(ratio: number): number {
+    if (ratio < 0.10) {
+      return 1;
+    } else if (ratio < 0.50) {
+      return 2;
+    } else if (ratio < 1.00) {
+      return 3;
+    } else {
+      return 4;
+    }
   }
 
   private getAIHARatingText(rating: number): string {
