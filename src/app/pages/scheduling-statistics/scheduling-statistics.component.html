@@ -2,6 +2,28 @@
   <div class="left">
     <h2>Scheduling Statistics</h2>
   </div>
+  <div class="right">
+    <button
+      mat-flat-button
+      color="primary"
+      type="button"
+      (click)="recalculateAIHARatings()"
+      [disabled]="recalculating()"
+      matTooltip="Recalculate AIHA ratings for all exposure groups"
+    >
+      <span class="btn-content">
+        <mat-icon *ngIf="!recalculating()">refresh</mat-icon>
+        <mat-progress-spinner
+          *ngIf="recalculating()"
+          class="btn-spinner"
+          mode="indeterminate"
+          diameter="20"
+          strokeWidth="3"
+        ></mat-progress-spinner>
+        <span class="btn-label">{{ recalculating() ? 'Recalculating...' : 'Recalculate AIHA Ratings' }}</span>
+      </span>
+    </button>
+  </div>
 </div>
 
 <div class="scheduling-stats-actions">

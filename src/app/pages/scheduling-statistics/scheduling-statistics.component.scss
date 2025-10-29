@@ -16,6 +16,22 @@
       font-weight: 500;
     }
   }
+
+  .right {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+
+    .btn-content {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .btn-spinner {
+      display: inline-block;
+    }
+  }
 }
 
 .scheduling-stats-actions {

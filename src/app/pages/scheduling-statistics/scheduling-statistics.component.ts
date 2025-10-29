@@ -5,6 +5,7 @@ import { CommonModule } from '@angular/common';
 import { Firestore } from '@angular/fire/firestore';
 import { collection } from 'firebase/firestore';
 import { collectionData } from '@angular/fire/firestore';
+import { Functions, httpsCallable } from '@angular/fire/functions';
 import { OrganizationService } from '../../services/organization/organization.service';
 import { MatTableModule } from '@angular/material/table';
 import { MatIconModule } from '@angular/material/icon';
@@ -38,6 +39,7 @@ import { EzColumn } from '../../models/ez-column.model';
 })
 export class SchedulingStatisticsComponent {
   private firestore = inject(Firestore);
+  private fns = inject(Functions);
   private orgService = inject(OrganizationService);
 
   exposureGroups$!: Observable<any[]>;
@@ -46,6 +48,9 @@ export class SchedulingStatisticsComponent {
 
   // Quick filter by Exposure Group
   filter = signal('');
+  
+  // Recalculation state
+  recalculating = signal(false);
 
   // Table configuration
   readonly schedulingStatsColumns = [
@@ -286,5 +291,42 @@ export class SchedulingStatisticsComponent {
 
   clearFilter() {
     this.filter.set('');
+  }
+
+  async recalculateAIHARatings() {
+    const orgId = this.orgService.orgStore.currentOrg()?.Uid;
+    if (!orgId) {
+      alert('No organization selected');
+      return;
+    }
+
+    const confirmMessage = 'This will recalculate AIHA ratings for all exposure groups in this organization. Continue?';
+    if (!window.confirm(confirmMessage)) {
+      return;
+    }
+
+    try {
+      this.recalculating.set(true);
+      const callable = httpsCallable<{ orgId: string; groupIds?: string[] }, any>(
+        this.fns,
+        'addAIHARatingsRetroactively'
+      );
+      
+      const result = await callable({ orgId });
+      
+      if (result.data?.ok) {
+        alert(`Successfully recalculated AIHA ratings for ${result.data.processedCount} exposure group(s).`);
+      } else {
+        const errorMsg = result.data?.errors?.length 
+          ? `Completed with ${result.data.errorCount} error(s). First error: ${result.data.errors[0]}`
+          : 'Recalculation completed with some errors.';
+        alert(errorMsg);
+      }
+    } catch (e: any) {
+      console.error('Failed to recalculate AIHA ratings', e);
+      alert(`Failed to recalculate AIHA ratings: ${e?.message || 'Unknown error'}`);
+    } finally {
+      this.recalculating.set(false);
+    }
   }
 }
