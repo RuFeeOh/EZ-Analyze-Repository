@@ -6,6 +6,7 @@ import { ExceedanceFractionComponent } from './pages/exceedance-fraction/exceeda
 import { ExposureGroupsComponent } from './pages/exposure-groups/exposure-groups.component';
 import { AgentsComponent } from './pages/agents/agents.component';
 import { SchedulingStatisticsComponent } from './pages/scheduling-statistics/scheduling-statistics.component';
+import { AdminComponent } from './pages/admin/admin.component';
 
 export const routes: Routes = [
     {
@@ -44,5 +45,10 @@ export const routes: Routes = [
         path: 'scheduling-statistics',
         title: 'Scheduling Statistics',
         component: SchedulingStatisticsComponent,
+    },
+    {
+        path: 'admin',
+        title: 'Admin',
+        component: AdminComponent,
     }
 ];
