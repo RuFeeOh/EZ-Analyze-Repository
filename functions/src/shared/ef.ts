@@ -5,6 +5,7 @@ import { Agent } from "../models/agent.model";
 import { ExceedanceFraction } from "../models/exceedance-fraction.model";
 import { SampleInfo } from "../models/sample-info.model";
 import { slugifyAgent } from "./agent";
+import { compactResults } from "./results";
 
 // Exceedance Fraction calculation (same as client service)
 function normalCDF(x: number) {
@@ -48,5 +49,17 @@ export function createExceedanceFraction(
         ResultsUsed: resultsUsed,
         AgentKey: slugifyAgent(agent.Name),
         AgentName: agent.Name,
+    };
+}
+
+
+export function compactEfSnapshot(snapshot: any) {
+    if (!snapshot || typeof snapshot !== 'object') return null;
+    return {
+        ExceedanceFraction: typeof snapshot.ExceedanceFraction === 'number' ? snapshot.ExceedanceFraction : null,
+        MostRecentNumber: typeof snapshot.MostRecentNumber === 'number' ? snapshot.MostRecentNumber : null,
+        AgentKey: snapshot.AgentKey ?? null,
+        AgentName: snapshot.AgentName ?? null,
+        Results: compactResults(snapshot.ResultsUsed),
     };
 }

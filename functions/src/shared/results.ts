@@ -78,3 +78,14 @@ export function resolveAgentKeyFromResult(result: SampleInfo): string {
     if (keyRaw) return slugifyAgent(keyRaw);
     return normalizeAgent(result?.Agent).key;
 }
+
+export function compactResults(results: SampleInfo[] | undefined): any[] {
+    if (!Array.isArray(results)) return [];
+    return results.map(r => ({
+        SampleNumber: r?.SampleNumber ?? null,
+        SampleDate: r?.SampleDate ?? null,
+        TWA: r?.TWA ?? null,
+        Agent: r?.Agent ?? '',
+        AgentKey: r?.AgentKey ?? null,
+    }));
+}

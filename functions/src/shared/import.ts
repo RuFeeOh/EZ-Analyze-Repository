@@ -12,9 +12,11 @@ import { Agent } from "../models/agent.model";
 import { createExceedanceFraction, calculateExceedanceProbability } from "./ef";
 import { IncomingSampleInfo } from "../models/incoming-sample-info.model";
 import { slugify } from "./common";
-import { getRowKeyVariants, normalizeResults, toKeySignatureMap } from "./results";
+import { compactResults, getRowKeyVariants, normalizeResults, toKeySignatureMap } from "./results";
 import { SampleGroupIn } from "../models/sample-group-in.model";
 import { ImportSampleInfo } from "../models/import-sample-info.model";
+import { finalizeJobStatus, startJobTracking } from "./job-tracking";
+import { appendAuditRecords, compactLatestMapForAudit } from "./audit";
 
 
 const timeoutMinute = 4;
@@ -113,41 +115,8 @@ class importJobStatus {
     }
 }
 
-async function startJobTracking(jobRef: admin.firestore.DocumentReference<admin.firestore.DocumentData, admin.firestore.DocumentData>, totalGroupsProvided: any, groups: any[], totalRowsProvided: any, uid: string) {
-    try {
-        const snap = await jobRef.get();
-        if (!snap.exists) {
-            const totalGroupsAll = typeof totalGroupsProvided === 'number' ? totalGroupsProvided : (groups as SampleGroupIn[]).length;
-            const totalRowsAll = typeof totalRowsProvided === 'number' ? totalRowsProvided : (groups as SampleGroupIn[]).reduce((sum, g) => sum + (g.samples?.length || 0), 0);
-            await jobRef.set({
-                status: 'running',
-                phase: 'running',
-                totalGroups: totalGroupsAll,
-                totalRows: totalRowsAll,
-                groupsProcessed: 0,
-                rowsWritten: 0,
-                failures: 0,
-                startedAt: Timestamp.now(),
-                updatedAt: Timestamp.now(),
-                createdBy: uid,
-            }, { merge: true });
-        }
-    } catch (e) { logger.warn('bulkImportResults: failed to init job doc', { error: (e as any)?.message || String(e) }); }
-}
 
-async function finalizeJobStatus(db: admin.firestore.Firestore, jobRef: admin.firestore.DocumentReference<admin.firestore.DocumentData, admin.firestore.DocumentData>, orgId: any, jobId: string) {
-    try {
-        await db.runTransaction(async (tx: any) => {
-            const snap = await tx.get(jobRef);
-            const d = (snap.data() || {}) as any;
-            const failuresAll = Number(d.failures || 0);
-            const status = failuresAll > 0 ? 'completed-with-errors' : 'completed';
-            tx.set(jobRef, { status, phase: 'done', completedAt: Timestamp.now(), updatedAt: Timestamp.now() }, { merge: true });
-        });
-    } catch (e: any) {
-        logger.warn('bulkImportResults: finalize failed', { orgId, jobId, error: e?.message || String(e) });
-    }
-}
+
 
 async function updateUndoMetadata(jobStatus: importJobStatus) {
     try {
@@ -661,16 +630,7 @@ function normalizeAgent(raw: string | null | undefined): AgentNormalization {
 
 
 
-function compactResults(results: SampleInfo[] | undefined): any[] {
-    if (!Array.isArray(results)) return [];
-    return results.map(r => ({
-        SampleNumber: r?.SampleNumber ?? null,
-        SampleDate: r?.SampleDate ?? null,
-        TWA: r?.TWA ?? null,
-        Agent: r?.Agent ?? '',
-        AgentKey: r?.AgentKey ?? null,
-    }));
-}
+
 
 function summarizeResultsForAudit(results: SampleInfo[] | undefined): { total: number; preview: any[] } {
     const arr = Array.isArray(results) ? results : [];
@@ -691,38 +651,8 @@ function compactEfSnapshot(snapshot: any) {
     };
 }
 
-function compactLatestMapForAudit(map: Record<string, AgentEfSnapshot> | undefined): Record<string, any> {
-    if (!map || typeof map !== 'object') return {};
-    const out: Record<string, any> = {};
-    for (const [key, snapshot] of Object.entries(map)) {
-        const compact = compactEfSnapshot(snapshot);
-        if (compact) out[key] = compact;
-    }
-    return out;
-}
 
 
-async function appendAuditRecords(orgId: string, entries: AuditLogRecord[]): Promise<void> {
-    if (!Array.isArray(entries) || entries.length === 0) return;
-    const db = getFirestore();
-    const chunkSize = 25;
-    for (let i = 0; i < entries.length; i += chunkSize) {
-        const chunk = entries.slice(i, i + chunkSize);
-        await Promise.all(chunk.map(async (entry) => {
-            try {
-                await db.collection(`organizations/${orgId}/auditLogs`).add({
-                    orgId,
-                    ...entry,
-                    metadata: entry.metadata || {},
-                    before: entry.before ?? null,
-                    after: entry.after ?? null,
-                });
-            } catch (e: any) {
-                logger.warn('appendAuditRecords failed', { orgId, error: e?.message || String(e) });
-            }
-        }));
-    }
-}
 
 function deepEqual(a: any, b: any): boolean {
     try {
