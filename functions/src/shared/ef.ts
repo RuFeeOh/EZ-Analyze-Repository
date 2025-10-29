@@ -70,5 +70,8 @@ export function compactEfSnapshot(snapshot: any) {
         AgentKey: snapshot.AgentKey ?? null,
         AgentName: snapshot.AgentName ?? null,
         Results: compactResults(snapshot.ResultsUsed),
+        AIHARating: typeof snapshot.AIHARating === 'number' ? snapshot.AIHARating : null,
+        NinetyFifthPercentile: typeof snapshot.NinetyFifthPercentile === 'number' ? snapshot.NinetyFifthPercentile : null,
+        AIHARatio: typeof snapshot.AIHARatio === 'number' ? snapshot.AIHARatio : null,
     };
 }

@@ -425,6 +425,9 @@ async function processIncomingSamples(
                     ExceedanceFraction: snap.ExceedanceFraction,
                     DateCalculated: snap.DateCalculated,
                     SamplesUsedCount: snap.MostRecentNumber,
+                    AIHARating: snap.AIHARating,
+                    NinetyFifthPercentile: snap.NinetyFifthPercentile,
+                    AIHARatio: snap.AIHARatio,
                 }]));
                 const prevEfVal = prevTopCompact?.ExceedanceFraction ?? null;
                 const payload: any = {
@@ -464,6 +467,9 @@ async function processIncomingSamples(
                     OELNumber: topSnapshot.OELNumber,
                     DateCalculated: topSnapshot.DateCalculated,
                     SamplesUsedCount: topSnapshot.MostRecentNumber,
+                    AIHARating: topSnapshot.AIHARating,
+                    NinetyFifthPercentile: topSnapshot.NinetyFifthPercentile,
+                    AIHARatio: topSnapshot.AIHARatio,
                     ByAgent: byAgentSummary,
                 } : null;
                 // Return both entry and undo metadata for this group
@@ -767,8 +773,10 @@ export function computeAgentEfState(
         const sameCount = prev ? (prev.MostRecentNumber || 0) === (snapshot.MostRecentNumber || 0) : false;
         const sameSamples = prev ? deepEqual(compactResults(prev.ResultsUsed), compactResults(snapshot.ResultsUsed)) : false;
         const sameOEL = prev ? prev.OELNumber === snapshot.OELNumber : false;
+        // Check if AIHA properties are missing in the previous snapshot
+        const hasAIHAProps = prev ? (prev.AIHARating !== undefined && prev.AIHARating !== null) : false;
 
-        if (prev && sameEf && sameCount && sameSamples && sameOEL) {
+        if (prev && sameEf && sameCount && sameSamples && sameOEL && hasAIHAProps) {
             latestByAgent[agentKey] = prev;
             historyByAgent[agentKey] = prevHistoryForAgent.length ? prevHistoryForAgent : (prevHistory[agentKey] || []);
         } else {
@@ -927,6 +935,9 @@ function undoImportsAndRespectExisting(
         ExceedanceFraction: snap.ExceedanceFraction,
         DateCalculated: snap.DateCalculated,
         SamplesUsedCount: snap.MostRecentNumber,
+        AIHARating: snap.AIHARating,
+        NinetyFifthPercentile: snap.NinetyFifthPercentile,
+        AIHARatio: snap.AIHARatio,
     }]));
     const nowTs = Timestamp.now();
 
@@ -955,6 +966,9 @@ function undoImportsAndRespectExisting(
         OELNumber: topSnapshot.OELNumber,
         DateCalculated: topSnapshot.DateCalculated,
         SamplesUsedCount: topSnapshot.MostRecentNumber,
+        AIHARating: topSnapshot.AIHARating,
+        NinetyFifthPercentile: topSnapshot.NinetyFifthPercentile,
+        AIHARatio: topSnapshot.AIHARatio,
         ByAgent: byAgentSummary,
     } : null;
     if (summaryEntry) {
@@ -1200,6 +1214,9 @@ export const removeAgentsFromExposureGroups = onCall(async (request) => {
                         ExceedanceFraction: snap.ExceedanceFraction,
                         DateCalculated: snap.DateCalculated,
                         SamplesUsedCount: snap.MostRecentNumber,
+                        AIHARating: snap.AIHARating,
+                        NinetyFifthPercentile: snap.NinetyFifthPercentile,
+                        AIHARatio: snap.AIHARatio,
                     }]));
                     const nowTs = Timestamp.now();
                     const latestByAgentPayload: Record<string, any> = {};
@@ -1242,6 +1259,9 @@ export const removeAgentsFromExposureGroups = onCall(async (request) => {
                         OELNumber: topSnapshot.OELNumber,
                         DateCalculated: topSnapshot.DateCalculated,
                         SamplesUsedCount: topSnapshot.MostRecentNumber,
+                        AIHARating: topSnapshot.AIHARating,
+                        NinetyFifthPercentile: topSnapshot.NinetyFifthPercentile,
+                        AIHARatio: topSnapshot.AIHARatio,
                         ByAgent: byAgentSummary,
                     } : FieldValue.delete();
                     return { status: 'updated', summary: summaryEntry, removedAgentsCount };
@@ -1332,6 +1352,9 @@ export const recomputeEfBatch = onCall(async (request) => {
             ExceedanceFraction: snap.ExceedanceFraction,
             DateCalculated: snap.DateCalculated,
             SamplesUsedCount: snap.MostRecentNumber,
+            AIHARating: snap.AIHARating,
+            NinetyFifthPercentile: snap.NinetyFifthPercentile,
+            AIHARatio: snap.AIHARatio,
         }]));
         const nowTs = Timestamp.now();
         const payload: any = {
@@ -1358,6 +1381,9 @@ export const recomputeEfBatch = onCall(async (request) => {
                 OELNumber: topSnapshot.OELNumber,
                 DateCalculated: topSnapshot.DateCalculated,
                 SamplesUsedCount: topSnapshot.MostRecentNumber,
+                AIHARating: topSnapshot.AIHARating,
+                NinetyFifthPercentile: topSnapshot.NinetyFifthPercentile,
+                AIHARatio: topSnapshot.AIHARatio,
                 ByAgent: byAgentSummary,
             } : null;
             return entry;
