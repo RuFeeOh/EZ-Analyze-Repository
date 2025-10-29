@@ -11,7 +11,7 @@ import * as admin from "firebase-admin";
 
 admin.initializeApp();
 export { createOrganization, deleteOrganization, renameOrganization } from "./shared/organization";
-export { bulkImportResults, undoImport, removeAgentsFromExposureGroups, recomputeEfBatch } from "./shared/import";
+export { bulkImportResults, undoImport, removeAgentsFromExposureGroups, recomputeEfBatch, addAIHARatingsRetroactively } from "./shared/import";
 
 // Start writing functions
 // https://firebase.google.com/docs/functions/typescript

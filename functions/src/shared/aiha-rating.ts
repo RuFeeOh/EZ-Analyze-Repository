@@ -3,6 +3,17 @@
 import { SampleInfo } from "../models/sample-info.model";
 
 /**
+ * AIHA exposure rating categories
+ */
+export enum AIHARating {
+    INVALID = 0,     // Invalid or insufficient data
+    CATEGORY_1 = 1,  // <10% of OEL
+    CATEGORY_2 = 2,  // >=10% <50% of OEL
+    CATEGORY_3 = 3,  // >=50% <100% of OEL
+    CATEGORY_4 = 4   // >=100% of OEL
+}
+
+/**
  * Calculate the 95th percentile from an array of measurements
  * @param measurements Array of TWA values
  * @returns 95th percentile value
@@ -10,6 +21,11 @@ import { SampleInfo } from "../models/sample-info.model";
 export function calculate95thPercentile(measurements: number[]): number {
     if (!measurements || measurements.length === 0) {
         return 0;
+    }
+
+    // If only one measurement, use it as the 95th percentile
+    if (measurements.length === 1) {
+        return measurements[0];
     }
 
     // For lognormal distribution, calculate 95th percentile
@@ -36,23 +52,23 @@ export function calculate95thPercentile(measurements: number[]): number {
  * 
  * @param ninetyFifthPercentile The 95th percentile value
  * @param OEL The Occupational Exposure Limit
- * @returns AIHA category (1-4)
+ * @returns AIHA category enum
  */
-export function calculateAIHARating(ninetyFifthPercentile: number, OEL: number): number {
+export function calculateAIHARating(ninetyFifthPercentile: number, OEL: number): AIHARating {
     if (!OEL || OEL === 0) {
-        return 0; // Invalid OEL
+        return AIHARating.INVALID; // Invalid OEL
     }
 
     const ratio = ninetyFifthPercentile / OEL;
 
     if (ratio < 0.10) {
-        return 1;
+        return AIHARating.CATEGORY_1;
     } else if (ratio < 0.50) {
-        return 2;
+        return AIHARating.CATEGORY_2;
     } else if (ratio < 1.00) {
-        return 3;
+        return AIHARating.CATEGORY_3;
     } else {
-        return 4;
+        return AIHARating.CATEGORY_4;
     }
 }
 
@@ -60,12 +76,12 @@ export function calculateAIHARating(ninetyFifthPercentile: number, OEL: number):
  * Get AIHA rating from sample results
  * @param results Array of sample results (most recent 6)
  * @param OEL Occupational Exposure Limit
- * @returns Object with 95th percentile, ratio, and AIHA rating
+ * @returns Object with 95th percentile, ratio, and AIHA rating enum
  */
 export function getAIHARatingFromSamples(results: SampleInfo[], OEL: number): {
     ninetyFifthPercentile: number;
     ratio: number;
-    aihaRating: number;
+    aihaRating: AIHARating;
 } {
     const measurements = results
         .map(r => r.TWA)
@@ -75,7 +91,7 @@ export function getAIHARatingFromSamples(results: SampleInfo[], OEL: number): {
         return {
             ninetyFifthPercentile: 0,
             ratio: 0,
-            aihaRating: 0
+            aihaRating: AIHARating.INVALID
         };
     }
 

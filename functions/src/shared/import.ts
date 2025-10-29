@@ -17,6 +17,7 @@ import { SampleGroupIn } from "../models/sample-group-in.model";
 import { ImportSampleInfo } from "../models/import-sample-info.model";
 import { finalizeJobStatus, startJobTracking } from "./job-tracking";
 import { appendAuditRecords, compactLatestMapForAudit } from "./audit";
+import { calculate95thPercentile, calculateAIHARating } from "./aiha-rating";
 
 
 const timeoutMinute = 4;
@@ -1393,4 +1394,155 @@ export const recomputeEfBatch = onCall(async (request) => {
         logger.warn('recomputeEfBatch: failed to write consolidated EfSummary', { orgId, error: e?.message || String(e) });
     }
     return { ok: true, count: groupIds.length };
+});
+
+/**
+ * Retroactively add AIHA ratings to existing exceedance fractions
+ * This function updates all exposure groups to add AIHA rating data to their
+ * LatestExceedanceFractionByAgent and ExceedanceFractionHistoryByAgent snapshots
+ */
+export const addAIHARatingsRetroactively = onCall({ timeoutSeconds: 540, memory: '1GiB' }, async (request) => {
+    const { orgId, groupIds } = request.data || {};
+
+    if (!orgId) {
+        throw new HttpsError('invalid-argument', 'orgId required');
+    }
+
+    const db = getFirestore();
+    const processedGroups: string[] = [];
+    const errors: string[] = [];
+
+    // If groupIds not provided, fetch all groups
+    let targetGroupIds = groupIds;
+    if (!targetGroupIds || !Array.isArray(targetGroupIds) || targetGroupIds.length === 0) {
+        const groupsSnapshot = await db.collection(`organizations/${orgId}/exposureGroups`).get();
+        targetGroupIds = groupsSnapshot.docs.map(doc => doc.id);
+    }
+
+    logger.info('addAIHARatingsRetroactively: starting', { orgId, groupCount: targetGroupIds.length });
+
+    for (const groupId of targetGroupIds) {
+        try {
+            const groupRef = db.doc(`organizations/${orgId}/exposureGroups/${groupId}`);
+
+            await db.runTransaction(async (tx: any) => {
+                const snap = await tx.get(groupRef);
+                if (!snap.exists) return;
+
+                const data = snap.data() || {};
+                let updated = false;
+
+                // Update LatestExceedanceFractionByAgent
+                if (data.LatestExceedanceFractionByAgent && typeof data.LatestExceedanceFractionByAgent === 'object') {
+                    const latestByAgent = data.LatestExceedanceFractionByAgent;
+                    for (const [, snapshot] of Object.entries(latestByAgent)) {
+                        if (snapshot && typeof snapshot === 'object') {
+                            const snap = snapshot as any;
+                            // Only add if AIHA rating doesn't exist
+                            if (snap.AIHARating === undefined || snap.AIHARating === null) {
+                                const resultsUsed = snap.ResultsUsed || [];
+                                const twaList = resultsUsed
+                                    .map((r: any) => r.TWA)
+                                    .filter((twa: any): twa is number => typeof twa === 'number' && !isNaN(twa) && twa > 0);
+
+                                if (twaList.length > 0) {
+                                    const ninetyFifthPercentile = calculate95thPercentile(twaList);
+                                    const aihaRatio = snap.OELNumber > 0 ? ninetyFifthPercentile / snap.OELNumber : 0;
+                                    const aihaRating = calculateAIHARating(ninetyFifthPercentile, snap.OELNumber);
+
+                                    snap.AIHARating = aihaRating;
+                                    snap.NinetyFifthPercentile = ninetyFifthPercentile;
+                                    snap.AIHARatio = aihaRatio;
+                                    updated = true;
+                                }
+                            }
+                        }
+                    }
+
+                    if (updated) {
+                        tx.set(groupRef, { LatestExceedanceFractionByAgent: latestByAgent }, { merge: true });
+                    }
+                }
+
+                // Update ExceedanceFractionHistoryByAgent
+                if (data.ExceedanceFractionHistoryByAgent && typeof data.ExceedanceFractionHistoryByAgent === 'object') {
+                    const historyByAgent = data.ExceedanceFractionHistoryByAgent;
+                    let historyUpdated = false;
+
+                    for (const [, history] of Object.entries(historyByAgent)) {
+                        if (Array.isArray(history)) {
+                            for (const snapshot of history) {
+                                if (snapshot && typeof snapshot === 'object') {
+                                    const snap = snapshot as any;
+                                    // Only add if AIHA rating doesn't exist
+                                    if (snap.AIHARating === undefined || snap.AIHARating === null) {
+                                        const resultsUsed = snap.ResultsUsed || [];
+                                        const twaList = resultsUsed
+                                            .map((r: any) => r.TWA)
+                                            .filter((twa: any): twa is number => typeof twa === 'number' && !isNaN(twa) && twa > 0);
+
+                                        if (twaList.length > 0) {
+                                            const ninetyFifthPercentile = calculate95thPercentile(twaList);
+                                            const aihaRatio = snap.OELNumber > 0 ? ninetyFifthPercentile / snap.OELNumber : 0;
+                                            const aihaRating = calculateAIHARating(ninetyFifthPercentile, snap.OELNumber);
+
+                                            snap.AIHARating = aihaRating;
+                                            snap.NinetyFifthPercentile = ninetyFifthPercentile;
+                                            snap.AIHARatio = aihaRatio;
+                                            historyUpdated = true;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if (historyUpdated) {
+                        tx.set(groupRef, { ExceedanceFractionHistoryByAgent: historyByAgent }, { merge: true });
+                    }
+                }
+
+                // Update legacy LatestExceedanceFraction if it exists
+                if (data.LatestExceedanceFraction && typeof data.LatestExceedanceFraction === 'object') {
+                    const snap = data.LatestExceedanceFraction as any;
+                    if (snap.AIHARating === undefined || snap.AIHARating === null) {
+                        const resultsUsed = snap.ResultsUsed || [];
+                        const twaList = resultsUsed
+                            .map((r: any) => r.TWA)
+                            .filter((twa: any): twa is number => typeof twa === 'number' && !isNaN(twa) && twa > 0);
+
+                        if (twaList.length > 0) {
+                            const ninetyFifthPercentile = calculate95thPercentile(twaList);
+                            const aihaRatio = snap.OELNumber > 0 ? ninetyFifthPercentile / snap.OELNumber : 0;
+                            const aihaRating = calculateAIHARating(ninetyFifthPercentile, snap.OELNumber);
+
+                            snap.AIHARating = aihaRating;
+                            snap.NinetyFifthPercentile = ninetyFifthPercentile;
+                            snap.AIHARatio = aihaRatio;
+
+                            tx.set(groupRef, { LatestExceedanceFraction: snap }, { merge: true });
+                        }
+                    }
+                }
+            });
+
+            processedGroups.push(groupId);
+        } catch (e: any) {
+            logger.error('addAIHARatingsRetroactively: failed for group', { orgId, groupId, error: e?.message || String(e) });
+            errors.push(`${groupId}: ${e?.message || String(e)}`);
+        }
+    }
+
+    logger.info('addAIHARatingsRetroactively: completed', {
+        orgId,
+        processedCount: processedGroups.length,
+        errorCount: errors.length
+    });
+
+    return {
+        ok: errors.length === 0,
+        processedCount: processedGroups.length,
+        errorCount: errors.length,
+        errors: errors.slice(0, 10) // Return first 10 errors to avoid too large response
+    };
 });

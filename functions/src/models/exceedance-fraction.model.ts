@@ -8,4 +8,8 @@ export type ExceedanceFraction = {
     ResultsUsed: SampleInfo[];
     AgentKey?: string;
     AgentName?: string;
+    // AIHA Rating fields
+    AIHARating?: number;
+    NinetyFifthPercentile?: number;
+    AIHARatio?: number;
 };
