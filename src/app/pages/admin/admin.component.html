@@ -68,19 +68,19 @@
                 </div>
                 <div class="stat-card success">
                   <div class="stat-value">
-                    {{ (backfillResult().results || []).filter((r: any) => r.status === 'success').length }}
+                    {{ getSuccessCount() }}
                   </div>
                   <div class="stat-label">Processed</div>
                 </div>
                 <div class="stat-card info">
                   <div class="stat-value">
-                    {{ (backfillResult().results || []).filter((r: any) => r.status === 'skipped').length }}
+                    {{ getSkippedCount() }}
                   </div>
                   <div class="stat-label">Skipped</div>
                 </div>
                 <div class="stat-card error">
                   <div class="stat-value">
-                    {{ (backfillResult().results || []).filter((r: any) => r.status === 'error').length }}
+                    {{ getErrorCount() }}
                   </div>
                   <div class="stat-label">Errors</div>
                 </div>

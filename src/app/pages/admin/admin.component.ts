@@ -107,4 +107,32 @@ export class AdminComponent {
         return 'help';
     }
   }
+
+  /**
+   * Helper to get backfill results safely
+   */
+  private getBackfillResults(): any[] {
+    return this.backfillResult()?.results ?? [];
+  }
+
+  /**
+   * Get count of successful backfills
+   */
+  getSuccessCount(): number {
+    return this.getBackfillResults().filter((r: any) => r.status === 'success').length;
+  }
+
+  /**
+   * Get count of skipped backfills
+   */
+  getSkippedCount(): number {
+    return this.getBackfillResults().filter((r: any) => r.status === 'skipped').length;
+  }
+
+  /**
+   * Get count of failed backfills
+   */
+  getErrorCount(): number {
+    return this.getBackfillResults().filter((r: any) => r.status === 'error').length;
+  }
 }

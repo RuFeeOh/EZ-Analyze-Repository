@@ -17,4 +17,24 @@ export class SnackService {
         const merged: MatSnackBarConfig = { ...this.defaults, ...(config || {}) };
         return this.snack.openFromComponent(component, merged);
     }
+
+    /**
+     * Show success message
+     */
+    success(message: string, duration = 5000): MatSnackBarRef<any> {
+        return this.open(message, 'Close', {
+            duration,
+            panelClass: ['snack-success']
+        });
+    }
+
+    /**
+     * Show error message
+     */
+    error(message: string, duration = 5000): MatSnackBarRef<any> {
+        return this.open(message, 'Close', {
+            duration,
+            panelClass: ['snack-error']
+        });
+    }
 }
