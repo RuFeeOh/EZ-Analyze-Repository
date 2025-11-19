@@ -18,7 +18,7 @@ interface CloseMessage { type: 'close'; }
 type InMessage = InitMessage | ReparseMessage | CloseMessage;
 
 type SampleInfo = {
-    SampleNumber?: number;
+    SampleNumber?: string;
     SampleDate: string;
     ExposureGroup: string;
     TWA?: number;
@@ -46,8 +46,10 @@ function mapAndValidateRow(row: any, mapping: Record<string, string | null>): Sa
     const errors: string[] = [];
     const normalized: any = {} as SampleInfo;
     const getVal = (field: string) => { const header = mapping[field]; if (!header) return undefined; return row[header]; };
-    const sampleNumber = tryParseNumber(getVal('SampleNumber'));
-    normalized.SampleNumber = Number.isFinite(sampleNumber) ? (sampleNumber as number) : undefined;
+    const sampleNumberRaw = getVal('SampleNumber');
+    const sampleNumber = normalizeString(sampleNumberRaw);
+    normalized.SampleNumber = sampleNumber;
+    if (!sampleNumber) errors.push('SampleNumber is required');
     const exposureGroup = normalizeString(getVal('ExposureGroup'));
     if (!exposureGroup) errors.push('ExposureGroup is required');
     normalized.ExposureGroup = exposureGroup;
