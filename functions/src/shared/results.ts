@@ -57,7 +57,7 @@ export function toKeySignatureMap(arr: SampleInfo[]): Map<string, { twa: number 
  * @returns 
  */
 export function getRowKeyVariants(result: SampleInfo): { sample: string | null; compound: string | null; agentKey: string } {
-    const sample = normalizeSampleNumber(result.SampleNumber as number);
+    const sample = normalizeSampleNumber(result.SampleNumber);
     const agentKey = resolveAgentKeyFromResult(result);
     return {
         sample,
@@ -67,7 +67,7 @@ export function getRowKeyVariants(result: SampleInfo): { sample: string | null; 
 }
 
 
-export function normalizeSampleNumber(value: number): string | null {
+export function normalizeSampleNumber(value: any): string | null {
     if (value === undefined || value === null) return null;
     const str = String(value).trim();
     return str ? str : null;

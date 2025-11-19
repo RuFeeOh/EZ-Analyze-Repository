@@ -11,7 +11,7 @@ import * as admin from "firebase-admin";
 
 admin.initializeApp();
 export { createOrganization, deleteOrganization, renameOrganization } from "./shared/organization";
-export { bulkImportResults, undoImport, removeAgentsFromExposureGroups, recomputeEfBatch, addAIHARatingsRetroactively } from "./shared/import";
+export { bulkImportResults, undoImport, removeAgentsFromExposureGroups, deleteSamplesFromExposureGroup, recomputeEfBatch, addAIHARatingsRetroactively } from "./shared/import";
 export { backfillPlantJobData, getPlantJobBackfillStatus, listPlantJobReviewCandidates } from "./shared/plant-job-backfill";
 export { autoBackfillPlantJob, triggerAutoBackfill } from "./shared/auto-backfill";
 

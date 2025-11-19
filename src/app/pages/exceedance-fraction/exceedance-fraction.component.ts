@@ -61,6 +61,7 @@ export class ExceedanceFractionComponent {
   undoBusy = signal(false);
   // Deletion busy state
   deleting = signal(false);
+  sampleDeletingKey = signal<string | null>(null);
   jobs$!: Observable<any[]>;
   // Quick filter by Exposure Group (used by table's built-in filtering)
   filter = signal('');
@@ -90,7 +91,7 @@ export class ExceedanceFractionComponent {
     new EzColumn({ Name: 'DateCalculated', DisplayName: 'Calculation Date', Format: 'date' }),
     new EzColumn({ Name: 'SamplesUsed', DisplayName: 'Samples Used' })
   ];
-  readonly efDetailColumns: string[] = ['SampleDate', 'ExposureGroup', 'TWA', 'Notes', 'SampleNumber'];
+  readonly efDetailColumns: string[] = ['SampleDate', 'ExposureGroup', 'TWA', 'Notes', 'SampleNumber', 'Actions'];
   readonly efDetailForItem = (item: any) => item?.ResultsUsed ?? [];
   // When selecting, prepend a checkbox column
   readonly efSummaryColumnsWithSelect = [
@@ -106,8 +107,14 @@ export class ExceedanceFractionComponent {
     this.exposureGroups$ = collectionData(ref as any, { idField: 'Uid' }).pipe(map(d => d as any[]));
 
     // Use pure utility functions (with internal memoization) to build items
-    this.efItems$ = this.exposureGroups$.pipe(map(groups => buildHistoryEfItems(groups as any)));
-    this.latestEfItems$ = this.exposureGroups$.pipe(map(groups => buildLatestEfItems(groups as any)));
+    this.efItems$ = this.exposureGroups$.pipe(
+      map(groups => buildHistoryEfItems(groups as any)),
+      map(items => this.decorateEfItems(items))
+    );
+    this.latestEfItems$ = this.exposureGroups$.pipe(
+      map(groups => buildLatestEfItems(groups as any)),
+      map(items => this.decorateEfItems(items))
+    );
     // Wire filtered streams to react to both data and bucket changes
     const bucket$ = toObservable(this.bucket);
     const agent$ = toObservable(this.agentFilter);
@@ -538,6 +545,94 @@ export class ExceedanceFractionComponent {
         queryParamsHandling: 'merge'
       });
     } catch { /* ignore navigation errors */ }
+  }
+
+  isSampleDeleting(sample: any): boolean {
+    const key = this.sampleKey(sample);
+    if (!key) return false;
+    return this.sampleDeletingKey() === key;
+  }
+
+  private sampleKey(sample: any): string {
+    if (!sample) return '';
+    const groupId = sample?.__groupId || sample?.GroupId || 'unknown-group';
+    const agentKey = sample?.AgentKey || sample?.__agentKey || 'unknown-agent';
+    const sampleNumber = sample?.SampleNumber || 'no-number';
+    const sampleDate = sample?.SampleDate || 'no-date';
+    const twa = (sample?.TWA ?? 'no-twa').toString();
+    return `${groupId}__${agentKey}__${sampleNumber}__${sampleDate}__${twa}`;
+  }
+
+  async deleteSample(sample: any, event?: Event) {
+    event?.stopPropagation();
+    if (!sample) return;
+    const orgId = this.orgService.orgStore.currentOrg()?.Uid;
+    const groupId = sample?.__groupId || sample?.GroupId || sample?.groupId;
+    if (!orgId || !groupId) {
+      alert('Unable to delete sample: missing organization or group information.');
+      return;
+    }
+    const sampleLabel = sample?.SampleNumber ? `Sample ${sample.SampleNumber}` : 'this sample';
+    const groupLabel = sample?.__groupName || 'this exposure group';
+    if (!window.confirm(`Delete ${sampleLabel} from ${groupLabel}? This cannot be undone.`)) return;
+    const key = this.sampleKey(sample);
+    const twaRaw = sample?.TWA;
+    const twa = (twaRaw === undefined || twaRaw === null || twaRaw === '') ? null : Number(twaRaw);
+    const payloadSample = {
+      SampleNumber: sample?.SampleNumber ?? null,
+      SampleDate: sample?.SampleDate ?? null,
+      AgentKey: sample?.AgentKey ?? sample?.__agentKey ?? null,
+      Agent: sample?.Agent ?? sample?.__agentName ?? null,
+      TWA: twa,
+      Notes: sample?.Notes ?? null,
+    };
+    const callable = httpsCallable<{ orgId: string; groupId: string; samples: any[] }, any>(this.fns, 'deleteSamplesFromExposureGroup');
+    let taskId: string | null = null;
+    try {
+      this.sampleDeletingKey.set(key);
+      taskId = this.bg.startTask({
+        label: 'Deleting sample',
+        detail: `${sample?.SampleNumber || sample?.SampleDate || 'Sample'} • ${groupLabel}`,
+        kind: 'other',
+        indeterminate: true,
+      });
+      await callable({ orgId, groupId, samples: [payloadSample] });
+      if (taskId) {
+        this.bg.completeTask(taskId, 'Sample deleted');
+      }
+    } catch (e) {
+      console.error('Sample deletion failed', e);
+      if (taskId) {
+        this.bg.failTask(taskId, 'Sample deletion failed');
+      }
+      alert('Sample deletion failed; see console for details.');
+    } finally {
+      this.sampleDeletingKey.set(null);
+    }
+  }
+
+  private decorateEfItems(items: any[] | null | undefined): any[] {
+    if (!Array.isArray(items)) return [];
+    return items.map(item => ({
+      ...item,
+      ResultsUsed: this.decorateResultsForItem(item)
+    }));
+  }
+
+  private decorateResultsForItem(item: any): any[] {
+    const results = Array.isArray(item?.ResultsUsed) ? item.ResultsUsed : [];
+    const groupId = item?.DocUid || item?.Uid || item?.GroupId || null;
+    const groupName = item?.ExposureGroup || item?.Group || '';
+    const agentKey = item?.AgentKey || '';
+    const agentName = item?.Agent || '';
+    return results.map((sample: any, index: number) => ({
+      ...sample,
+      __groupId: sample?.__groupId ?? groupId,
+      __groupName: sample?.__groupName ?? groupName,
+      __agentKey: sample?.AgentKey ?? sample?.__agentKey ?? agentKey,
+      __agentName: sample?.Agent ?? sample?.__agentName ?? agentName,
+      __detailIndex: index,
+    }));
   }
 
   private slugifyAgent(value: string): string {

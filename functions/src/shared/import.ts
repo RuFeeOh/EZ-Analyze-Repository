@@ -1357,6 +1357,243 @@ export const removeAgentsFromExposureGroups = onCall(async (request) => {
     return { ok: true, groups: normalizedRemovals.size, removedAgents: removedAgentsTotal, jobId, groupsDeleted: groupsDeletedTotal, failures: failuresTotal };
 });
 
+interface SampleDeletionCriteria {
+    sampleNumber: string | null;
+    sampleDate: string | null;
+    agentKey: string | null;
+    twa: number | null;
+}
+
+function normalizeSampleNumberInput(value: any): string | null {
+    if (value === undefined || value === null) return null;
+    const str = String(value).trim();
+    return str ? str : null;
+}
+
+function normalizeDateForMatch(value: any): string | null {
+    if (!value) return null;
+    if (typeof value === 'string') {
+        const trimmed = value.trim();
+        if (!trimmed) return null;
+        const parsed = new Date(trimmed);
+        if (!isNaN(parsed.getTime())) {
+            return parsed.toISOString().slice(0, 10);
+        }
+        if (trimmed.includes('T')) {
+            const [datePart] = trimmed.split('T');
+            if (datePart) return datePart;
+        }
+        if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+        return trimmed;
+    }
+    if (value instanceof Date) {
+        return value.toISOString().slice(0, 10);
+    }
+    if (typeof value?.toDate === 'function') {
+        try {
+            return value.toDate().toISOString().slice(0, 10);
+        } catch {
+            return null;
+        }
+    }
+    return null;
+}
+
+function normalizeTwaValue(value: any): number | null {
+    if (value === undefined || value === null || value === '') return null;
+    const num = Number(value);
+    return Number.isFinite(num) ? num : null;
+}
+
+function normalizeSampleDeletionCriteria(input: any): SampleDeletionCriteria | null {
+    if (!input || typeof input !== 'object') return null;
+    const sampleNumber = normalizeSampleNumberInput(input?.sampleNumber ?? input?.SampleNumber);
+    const sampleDate = normalizeDateForMatch(input?.sampleDate ?? input?.SampleDate);
+    const agentSource = input?.agentKey ?? input?.AgentKey ?? input?.agent ?? input?.Agent;
+    const agentKey = (typeof agentSource === 'string' && agentSource.trim()) ? slugifyAgent(agentSource.trim()) : null;
+    const twa = normalizeTwaValue(input?.twa ?? input?.TWA);
+    if (!sampleNumber && !sampleDate && !agentKey) {
+        return null;
+    }
+    return { sampleNumber, sampleDate, agentKey, twa };
+}
+
+function normalizeSampleForMatching(sample: any): SampleDeletionCriteria {
+    const sampleNumber = normalizeSampleNumberInput(sample?.SampleNumber ?? sample?.sampleNumber);
+    const sampleDate = normalizeDateForMatch(sample?.SampleDate ?? sample?.sampleDate);
+    const agentSource = sample?.AgentKey ?? sample?.agentKey ?? sample?.Agent ?? sample?.agent ?? '';
+    const agentKey = slugifyAgent(String(agentSource || ''));
+    const twa = normalizeTwaValue(sample?.TWA ?? sample?.twa);
+    return { sampleNumber, sampleDate, agentKey, twa };
+}
+
+function matchesSample(candidate: any, criteria: SampleDeletionCriteria): boolean {
+    const normalized = normalizeSampleForMatching(candidate);
+    if (criteria.sampleNumber) {
+        if (!normalized.sampleNumber || normalized.sampleNumber !== criteria.sampleNumber) return false;
+    }
+    if (criteria.agentKey) {
+        if (!normalized.agentKey || normalized.agentKey !== criteria.agentKey) return false;
+    }
+    if (criteria.sampleDate) {
+        if (!normalized.sampleDate || normalized.sampleDate !== criteria.sampleDate) return false;
+    }
+    if (criteria.twa !== null && criteria.twa !== undefined) {
+        if (!almostEqual(normalized.twa, criteria.twa)) return false;
+    }
+    return true;
+}
+
+export const deleteSamplesFromExposureGroup = onCall(async (request) => {
+    const { orgId, groupId, samples } = request.data || {};
+    const uid = request.auth?.uid || 'system';
+    if (!orgId || typeof orgId !== 'string') {
+        throw new HttpsError('invalid-argument', 'orgId required');
+    }
+    if (!groupId || typeof groupId !== 'string') {
+        throw new HttpsError('invalid-argument', 'groupId required');
+    }
+    if (!Array.isArray(samples) || samples.length === 0) {
+        throw new HttpsError('invalid-argument', 'samples[] required');
+    }
+    const criteriaList = (samples as any[])
+        .map(entry => normalizeSampleDeletionCriteria(entry))
+        .filter((entry): entry is SampleDeletionCriteria => !!entry);
+    if (!criteriaList.length) {
+        throw new HttpsError('invalid-argument', 'No valid sample descriptors provided');
+    }
+    const db = getFirestore();
+    const parentRef = db.doc(`organizations/${orgId}/exposureGroups/${groupId}`);
+    const outcome = await db.runTransaction(async (tx: any) => {
+        const snap = await tx.get(parentRef);
+        if (!snap.exists) {
+            throw new HttpsError('not-found', 'Exposure group not found');
+        }
+        const data = (snap.data() || {}) as any;
+        const existing: any[] = Array.isArray(data.Results) ? [...data.Results] : [];
+        if (!existing.length) {
+            throw new HttpsError('failed-precondition', 'No samples available to delete');
+        }
+        const remaining = [...existing];
+        const removed: any[] = [];
+        for (const criteria of criteriaList) {
+            const idx = remaining.findIndex(candidate => matchesSample(candidate, criteria));
+            if (idx === -1) continue;
+            const [deleted] = remaining.splice(idx, 1);
+            removed.push(deleted);
+        }
+        if (!removed.length) {
+            throw new HttpsError('not-found', 'No matching samples found in this exposure group');
+        }
+        if (!remaining.length) {
+            tx.delete(parentRef);
+            return { status: 'deleted', removedCount: removed.length, summary: null };
+        }
+        const normalize = (r: any): SampleInfo => new SampleInfo({
+            Location: r?.Location ?? "",
+            SampleNumber: (r?.SampleNumber === undefined || r?.SampleNumber === '') ? null : r?.SampleNumber,
+            SampleDate: r?.SampleDate ?? "",
+            ExposureGroup: r?.ExposureGroup || r?.Group || data?.ExposureGroup || data?.Group || groupId,
+            Agent: typeof r?.Agent === 'string' ? r.Agent.trim() : '',
+            AgentKey: r?.AgentKey || normalizeAgent(r?.Agent).key,
+            TWA: (r?.TWA === '' || r?.TWA === undefined || r?.TWA === null) ? null : Number(r?.TWA),
+            Notes: r?.Notes ?? "",
+            ImportJobId: r?.ImportJobId ?? null,
+            Group: "",
+        } as SampleInfo);
+        const normalized = remaining.map(normalize);
+        const sorted = [...normalized].sort((a, b) => parseDateToEpoch(b.SampleDate) - parseDateToEpoch(a.SampleDate));
+        const limited = sorted.slice(0, 30);
+        const preview = getMostRecentSamples(limited as any, 6);
+        const agentEfState = computeAgentEfState(limited as any, data?.LatestExceedanceFractionByAgent, data?.ExceedanceFractionHistoryByAgent);
+        let topSnapshot = agentEfState.topSnapshot;
+        if (!topSnapshot) {
+            const fallbackMostRecent = getMostRecentSamples(sorted as any, 6);
+            const fallbackTwa = fallbackMostRecent.map(r => Number(r.TWA)).filter(n => n > 0);
+            const fallbackAgent = new Agent({ Name: 'Unknown', OELNumber: 0.05 });
+            const fallback = createExceedanceFraction(
+                (fallbackTwa.length >= 2) ? calculateExceedanceProbability(fallbackTwa, fallbackAgent.OELNumber) : 0,
+                fallbackMostRecent as any,
+                fallbackTwa,
+                fallbackAgent
+            ) as AgentEfSnapshot;
+            fallback.AgentKey = fallback.AgentKey || 'unknown';
+            fallback.AgentName = fallback.AgentName || 'Unknown';
+            topSnapshot = fallback;
+        }
+        const prevTopCompact = compactEfSnapshot(data?.LatestExceedanceFraction);
+        const newTopCompact = compactEfSnapshot(topSnapshot);
+        const topChanged = !deepEqual(prevTopCompact, newTopCompact);
+        const byAgentSummary = Object.fromEntries(Object.entries(agentEfState.latestByAgent).map(([key, snap]) => [key, {
+            Agent: snap.AgentName,
+            AgentKey: snap.AgentKey,
+            ExceedanceFraction: snap.ExceedanceFraction,
+            DateCalculated: snap.DateCalculated,
+            SamplesUsedCount: snap.MostRecentNumber,
+            AIHARating: snap.AIHARating,
+            NinetyFifthPercentile: snap.NinetyFifthPercentile,
+            AIHARatio: snap.AIHARatio,
+        }]));
+        const nowTs = Timestamp.now();
+        const latestPayload: Record<string, any> = {};
+        for (const [key, snapshot] of Object.entries(agentEfState.latestByAgent)) {
+            latestPayload[key] = snapshot;
+        }
+        const historyPayload: Record<string, any> = {};
+        for (const [key, history] of Object.entries(agentEfState.historyByAgent)) {
+            historyPayload[key] = history;
+        }
+        for (const removedKey of agentEfState.removedAgentKeys) {
+            latestPayload[removedKey] = FieldValue.delete();
+            historyPayload[removedKey] = FieldValue.delete();
+        }
+        const payload: any = {
+            Results: limited,
+            ResultsPreview: preview,
+            ResultsTotalCount: limited.length,
+            LatestExceedanceFractionByAgent: latestPayload,
+            ExceedanceFractionHistoryByAgent: historyPayload,
+            updatedAt: nowTs,
+            updatedBy: uid,
+        };
+        if (topSnapshot) {
+            payload.LatestExceedanceFraction = topSnapshot;
+            if (topChanged || !data?.LatestExceedanceFraction) {
+                payload.ExceedanceFractionHistory = FieldValue.arrayUnion(topSnapshot as any);
+                payload.EFComputedAt = nowTs;
+            }
+        }
+        tx.set(parentRef, payload, { merge: true });
+        const summaryEntry = topSnapshot ? {
+            GroupId: groupId,
+            ExposureGroup: data?.ExposureGroup || data?.Group || groupId,
+            ExceedanceFraction: topSnapshot.ExceedanceFraction,
+            PreviousExceedanceFraction: prevTopCompact?.ExceedanceFraction ?? null,
+            Agent: topSnapshot.AgentName ?? null,
+            AgentKey: topSnapshot.AgentKey ?? null,
+            OELNumber: topSnapshot.OELNumber,
+            DateCalculated: topSnapshot.DateCalculated,
+            SamplesUsedCount: topSnapshot.MostRecentNumber,
+            AIHARating: topSnapshot.AIHARating,
+            NinetyFifthPercentile: topSnapshot.NinetyFifthPercentile,
+            AIHARatio: topSnapshot.AIHARatio,
+            ByAgent: byAgentSummary,
+        } : null;
+        return { status: 'updated', removedCount: removed.length, summary: summaryEntry };
+    });
+    const orgSummaryUpdate: Record<string, any> = {};
+    if (outcome.status === 'deleted') {
+        orgSummaryUpdate[`EfSummary.${groupId}`] = FieldValue.delete();
+    } else if (outcome.summary) {
+        orgSummaryUpdate[`EfSummary.${groupId}`] = outcome.summary;
+    }
+    if (Object.keys(orgSummaryUpdate).length > 0) {
+        const orgRef = db.doc(`organizations/${orgId}`);
+        await orgRef.set(orgSummaryUpdate as any, { merge: true });
+    }
+    return { ok: true, removed: outcome.removedCount, status: outcome.status };
+});
+
 
 
 // HTTPS callable to recompute EF for a set of groups

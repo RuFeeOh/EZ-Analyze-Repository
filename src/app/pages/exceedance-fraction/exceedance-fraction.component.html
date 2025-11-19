@@ -311,6 +311,19 @@
                     <ng-container *ngSwitchCase="'DateCalculated'">{{ value | date:'mediumDate' }}</ng-container>
                     <ng-container *ngSwitchCase="'SampleDate'">{{ value | date:'mediumDate' }}</ng-container>
                     <ng-container *ngSwitchCase="'TWA'">{{ value | number:'1.3-3' }}</ng-container>
+                    <ng-container *ngSwitchCase="'Actions'">
+                         @if (section === 'detail') {
+                <button mat-icon-button
+                     color="warn"
+                     type="button"
+                                 (click)="deleteSample(item, $event)"
+                                 [disabled]="isSampleDeleting(item)"
+                                 matTooltip="Delete sample">
+                              <mat-icon *ngIf="!isSampleDeleting(item)">delete</mat-icon>
+                              <mat-icon *ngIf="isSampleDeleting(item)">hourglass_top</mat-icon>
+                         </button>
+                         }
+                    </ng-container>
                     <ng-container *ngSwitchDefault>{{ value }}</ng-container>
                </ng-container>
           </ng-template>
