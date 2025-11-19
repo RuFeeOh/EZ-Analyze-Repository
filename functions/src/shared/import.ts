@@ -30,7 +30,7 @@ async function loadExistingExposureGroupNames(db: admin.firestore.Firestore, org
             .select('ExposureGroup', 'Group')
             .limit(500)
             .get();
-        
+
         const names: string[] = [];
         snapshot.forEach(doc => {
             const data = doc.data();
@@ -39,7 +39,7 @@ async function loadExistingExposureGroupNames(db: admin.firestore.Firestore, org
                 names.push(name);
             }
         });
-        
+
         return names;
     } catch (e) {
         logger.warn('loadExistingExposureGroupNames: failed to load', { orgId, error: (e as any)?.message || String(e) });
@@ -72,7 +72,7 @@ export const bulkImportResults = onCall({ timeoutSeconds: timeoutSeconds, memory
     const db = getFirestore();
     const jobId = getIdForJob(providedJobId, providedImportId);
     const jobRef = db.doc(`organizations/${orgId}/importJobs/${jobId}`);
-    
+
     // Load existing exposure groups for plant dictionary
     const existingGroups = await loadExistingExposureGroupNames(db, orgId);
     const plantJobExtractor = new PlantJobExtractor(existingGroups);
@@ -322,7 +322,7 @@ async function processIncomingSamples(
     const parentRef = jobStatus.db?.doc(`organizations/${jobStatus.orgId}/exposureGroups/${groupId}`);
     const incoming: SampleInfo[] = (g.samples || []).map(sanitizeIncomingSampleInfo) as SampleInfo[];
     jobStatus.rowsWritten += incoming.length;
-    
+
     // Extract plant and job from exposure group name
     const plantJobData = plantJobExtractor.extract(g.groupName);
     try {
@@ -413,7 +413,7 @@ async function processIncomingSamples(
                 };
                 if (!snap.exists) {
                     payload.createdAt = nowTs,
-                    payload.createdBy = jobStatus.uid;
+                        payload.createdBy = jobStatus.uid;
                 }
                 tx.set(parentRef, payload, { merge: true });
                 const audit: AuditLogRecord = {
