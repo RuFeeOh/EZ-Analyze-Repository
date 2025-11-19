@@ -3,7 +3,7 @@ export class ExposureGroupTableItem {
     ExposureGroup: string = "";
     TWA: number = 0;
     Notes: string = "";
-    SampleNumber: number = 0;;
+    SampleNumber: string = "";
     constructor(partial?: Partial<ExposureGroupTableItem>) {
         Object.assign(this, partial);
     }

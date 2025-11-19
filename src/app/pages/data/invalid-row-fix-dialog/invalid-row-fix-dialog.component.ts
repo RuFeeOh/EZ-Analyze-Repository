@@ -8,23 +8,23 @@ import { MatIconModule } from '@angular/material/icon';
 import { MatTooltipModule } from '@angular/material/tooltip';
 
 interface InvalidRowEditData {
-    rows: {
-        index: number; // original index in excelData array
-        SampleNumber?: number;
-        SampleDate?: string; // ISO string or empty
-        ExposureGroup?: string;
-        TWA?: number;
-        Agent?: string;
-        Notes?: string;
-        __errors?: string[];
-    }[];
+  rows: {
+    index: number; // original index in excelData array
+    SampleNumber?: string;
+    SampleDate?: string; // ISO string or empty
+    ExposureGroup?: string;
+    TWA?: number;
+    Agent?: string;
+    Notes?: string;
+    __errors?: string[];
+  }[];
 }
 
 @Component({
-    selector: 'app-invalid-row-fix-dialog',
-    standalone: true,
-    imports: [CommonModule, FormsModule, MatButtonModule, MatInputModule, MatIconModule, MatTooltipModule],
-    template: `
+  selector: 'app-invalid-row-fix-dialog',
+  standalone: true,
+  imports: [CommonModule, FormsModule, MatButtonModule, MatInputModule, MatIconModule, MatTooltipModule],
+  template: `
   <h2 mat-dialog-title>Fix Invalid Rows</h2>
   <div class="dialog-body">
     <p class="hint" *ngIf="edits().length === 0">No invalid rows to edit.</p>
@@ -34,6 +34,10 @@ interface InvalidRowEditData {
         <label>
           <span>Sample Date</span>
           <input type="date" [(ngModel)]="r.SampleDate" />
+        </label>
+        <label>
+          <span>Sample Number *</span>
+          <input type="text" [(ngModel)]="r.SampleNumber" />
         </label>
         <label>
           <span>Exposure Group *</span>
@@ -59,7 +63,7 @@ interface InvalidRowEditData {
     <button matButton="filled" color="primary" (click)="apply()" [disabled]="!isValidAll()">Apply</button>
   </div>
   `,
-    styles: [`
+  styles: [`
     :host { display:block; width:100%; max-width:760px; }
     .dialog-body { max-height:65vh; overflow:auto; padding:4px 4px 12px; }
     .row-edit { border:1px solid #304050; padding:12px 14px; border-radius:10px; margin-bottom:12px; background:#1d2329; }
@@ -74,49 +78,50 @@ interface InvalidRowEditData {
   `]
 })
 export class InvalidRowFixDialogComponent {
-    edits = signal<any[]>([]);
-    constructor(@Inject(MAT_DIALOG_DATA) public data: InvalidRowEditData, private ref: MatDialogRef<InvalidRowFixDialogComponent>) {
-        // Deep clone rows and normalize SampleDate to yyyy-MM-dd for date input binding
-        const cloned = (data.rows || []).map(r => {
-            const copy: any = { ...r };
-            if (copy.SampleDate) {
-                try {
-                    const d = new Date(copy.SampleDate);
-                    if (!isNaN(d.getTime())) {
-                        const yyyy = d.getFullYear();
-                        const mm = String(d.getMonth() + 1).padStart(2, '0');
-                        const dd = String(d.getDate()).padStart(2, '0');
-                        copy.SampleDate = `${yyyy}-${mm}-${dd}`;
-                    }
-                } catch { /* ignore */ }
-            }
-            return copy;
-        });
-        this.edits.set(cloned);
-    }
-    isValidAll() {
-        return this.edits().every(r => {
-            // required: ExposureGroup, TWA (>0), SampleDate parseable if provided
-            const twaOk = r.TWA !== undefined && r.TWA !== null && r.TWA !== '' && !isNaN(Number(r.TWA)) && Number(r.TWA) > 0;
-            const expOk = !!(r.ExposureGroup && r.ExposureGroup.trim());
-            // Allow blank date? Keep original logic: date required
-            const dateOk = !!r.SampleDate;
-            return twaOk && expOk && dateOk;
-        });
-    }
-    apply() {
-        // Convert date inputs (yyyy-MM-dd) back to ISO strings before returning
-        const out = this.edits().map(r => {
-            const copy = { ...r };
-            if (copy.SampleDate) {
-                try {
-                    const d = new Date(copy.SampleDate + 'T00:00:00');
-                    if (!isNaN(d.getTime())) copy.SampleDate = d.toISOString();
-                } catch { }
-            }
-            return copy;
-        });
-        this.ref.close(out);
-    }
-    close() { this.ref.close(null); }
+  edits = signal<any[]>([]);
+  constructor(@Inject(MAT_DIALOG_DATA) public data: InvalidRowEditData, private ref: MatDialogRef<InvalidRowFixDialogComponent>) {
+    // Deep clone rows and normalize SampleDate to yyyy-MM-dd for date input binding
+    const cloned = (data.rows || []).map(r => {
+      const copy: any = { ...r };
+      if (copy.SampleDate) {
+        try {
+          const d = new Date(copy.SampleDate);
+          if (!isNaN(d.getTime())) {
+            const yyyy = d.getFullYear();
+            const mm = String(d.getMonth() + 1).padStart(2, '0');
+            const dd = String(d.getDate()).padStart(2, '0');
+            copy.SampleDate = `${yyyy}-${mm}-${dd}`;
+          }
+        } catch { /* ignore */ }
+      }
+      return copy;
+    });
+    this.edits.set(cloned);
+  }
+  isValidAll() {
+    return this.edits().every(r => {
+      // required: ExposureGroup, TWA (>0), SampleDate parseable if provided
+      const twaOk = r.TWA !== undefined && r.TWA !== null && r.TWA !== '' && !isNaN(Number(r.TWA)) && Number(r.TWA) > 0;
+      const expOk = !!(r.ExposureGroup && r.ExposureGroup.trim());
+      const snOk = !!(r.SampleNumber && r.SampleNumber.trim());
+      // Allow blank date? Keep original logic: date required
+      const dateOk = !!r.SampleDate;
+      return twaOk && expOk && dateOk && snOk;
+    });
+  }
+  apply() {
+    // Convert date inputs (yyyy-MM-dd) back to ISO strings before returning
+    const out = this.edits().map(r => {
+      const copy = { ...r };
+      if (copy.SampleDate) {
+        try {
+          const d = new Date(copy.SampleDate + 'T00:00:00');
+          if (!isNaN(d.getTime())) copy.SampleDate = d.toISOString();
+        } catch { }
+      }
+      return copy;
+    });
+    this.ref.close(out);
+  }
+  close() { this.ref.close(null); }
 }

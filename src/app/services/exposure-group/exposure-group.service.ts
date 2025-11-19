@@ -25,12 +25,11 @@ export class ExposureGroupService {
   private sanitizeRows(rows: SampleInfo[] = []): SampleInfo[] {
     return (rows || []).map((r: any) => {
       // Ensure we never return undefined fields (Firestore forbids undefined values)
-      const sampleNumber = r?.SampleNumber;
       const twaRaw = r?.TWA;
       const twa = (twaRaw === '' || twaRaw === undefined || twaRaw === null) ? null : Number(twaRaw);
       return {
         Location: r?.Location ?? "",
-        SampleNumber: (sampleNumber === undefined || sampleNumber === '') ? null : sampleNumber,
+        SampleNumber: r?.SampleNumber ? String(r.SampleNumber) : "",
         SampleDate: r?.SampleDate ?? "",
         ExposureGroup: r?.ExposureGroup ?? "",
         Agent: r?.Agent ?? "",

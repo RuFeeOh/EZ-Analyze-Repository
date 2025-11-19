@@ -92,19 +92,20 @@ export class DataComponent {
       .map(x => x.r);
   });
   errorCounts = computed(() => {
-    const counts: Record<string, number> = { ExposureGroup: 0, TWA: 0, SampleDate: 0 };
+    const counts: Record<string, number> = { ExposureGroup: 0, TWA: 0, SampleDate: 0, SampleNumber: 0 };
     for (const r of this.excelData()) {
       for (const e of (r.__errors || [])) {
         if (e.includes('ExposureGroup')) counts['ExposureGroup']++;
         else if (e.includes('TWA')) counts['TWA']++;
         else if (e.includes('SampleDate')) counts['SampleDate']++;
+        else if (e.includes('SampleNumber')) counts['SampleNumber']++;
       }
     }
     return counts;
   });
   errorTooltip = computed(() => {
     const c = this.errorCounts();
-    return `ExposureGroup: ${c['ExposureGroup']}, TWA: ${c['TWA']}, SampleDate: ${c['SampleDate']}`;
+    return `ExposureGroup: ${c['ExposureGroup']}, TWA: ${c['TWA']}, SampleDate: ${c['SampleDate']}, SampleNumber: ${c['SampleNumber']}`;
   });
   headerLabels: Record<string, string> = {
     SampleNumber: 'Sample #',
@@ -143,7 +144,8 @@ export class DataComponent {
       return;
     }
     if (result.allRequiredMapped) {
-      this.excelData.set(result.primary.parsed as any);
+      const validated = this.validateRows(result.primary.parsed as any);
+      this.excelData.set(validated as any);
       this.calculateExceedanceFraction();
       return;
     }
@@ -164,7 +166,8 @@ export class DataComponent {
       const reparsed = this.upload.reparseBuffered ? await this.upload.reparseBuffered(chosen.sheet, finalMapping) : this.upload.reparse(result.workbook, chosen.sheet, finalMapping);
       const stillMissing = result.required.filter(r => !finalMapping[r]);
       if (stillMissing.length) { this.snackBar.open('Missing required columns: ' + stillMissing.join(', '), 'Dismiss', { duration: 6000, verticalPosition: 'top' }); return; }
-      this.excelData.set(reparsed as any);
+      const validated = this.validateRows(reparsed as any);
+      this.excelData.set(validated as any);
       this.lastSelectedSheet = chosen.sheet;
       this.lastFinalMapping = finalMapping;
       this.calculateExceedanceFraction();
@@ -196,13 +199,17 @@ export class DataComponent {
         this.snackBar.open('Missing required columns: ' + stillMissing.join(', '), 'Dismiss', { duration: 6000, verticalPosition: 'top' });
         return;
       }
-      this.excelData.set(reparsed);
+      const validated = this.validateRows(reparsed as any);
+      this.excelData.set(validated as any);
       this.lastSelectedSheet = chosen.sheet;
       this.lastFinalMapping = finalMapping;
       this.calculateExceedanceFraction();
     });
   }
   // Column mapping helpers
+  private validateRows(rows: (SampleInfo & { __invalid?: boolean; __errors?: string[] })[] = []) {
+    return (rows || []).map(r => this.upload.validateExistingRow({ ...r }));
+  }
 
 
   calculateExceedanceFraction() {
@@ -239,6 +246,7 @@ export class DataComponent {
         if (idx < 0 || idx >= updated.length) continue;
         const current = { ...updated[idx] } as any;
         current.SampleDate = edit.SampleDate ? new Date(edit.SampleDate).toISOString() : '';
+        current.SampleNumber = (edit.SampleNumber || '').trim();
         current.ExposureGroup = (edit.ExposureGroup || '').trim();
         current.TWA = edit.TWA !== undefined && edit.TWA !== null && edit.TWA !== '' ? Number(edit.TWA) : undefined;
         current.Agent = edit.Agent || current.Agent;

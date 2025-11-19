@@ -1,7 +1,7 @@
 
 export type IncomingSampleInfo = {
     Location?: string;
-    SampleNumber?: string | number | null;
+    SampleNumber?: string;
     SampleDate?: string;
     ExposureGroup?: string;
     Agent?: string;

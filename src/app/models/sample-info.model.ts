@@ -1,6 +1,6 @@
 export class SampleInfo {
     Location: string = "";
-    SampleNumber: number | undefined = 0;
+    SampleNumber: string = "";
     SampleDate: string = "";
     ExposureGroup: string = "";
     Agent: string = "";

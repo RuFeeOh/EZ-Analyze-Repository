@@ -4,7 +4,7 @@ export class SampleInfo {
     Group!: string;
     TWA!: number | string;
     Notes!: string;
-    SampleNumber!: string | number;
+    SampleNumber!: string;
     Agent!: string;
     AgentKey!: string;
     constructor(init?: Partial<SampleInfo>) {

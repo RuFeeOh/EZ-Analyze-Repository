@@ -223,7 +223,7 @@ export class EzTableComponent implements AfterViewInit {
   // Dynamically size the viewport to fill remaining window space while respecting
   // min and max caps. Max around 70vh, min 300px.
   @HostListener('window:resize')
-  private resizeViewport() {
+  protected resizeViewport() {
     const el = this._viewportEl?.nativeElement;
     if (!el) return;
     try {

@@ -158,6 +158,7 @@ export class UploadService {
     validateExistingRow(row: any) {
         const errors: string[] = [];
         if (!row.ExposureGroup) errors.push('ExposureGroup is required');
+        if (!row.SampleNumber) errors.push('SampleNumber is required');
         if (row.TWA === undefined || row.TWA === null || row.TWA === '') errors.push('TWA is required');
         else if (typeof row.TWA !== 'number' || !isFinite(row.TWA)) errors.push('TWA must be a number');
         else if (row.TWA <= 0) errors.push('TWA must be > 0');
@@ -256,8 +257,9 @@ export class UploadService {
         const errors: string[] = [];
         const normalized: SampleInfo = new SampleInfo();
         const getVal = (field: string) => { const header = mapping[field]; if (!header) return undefined; return row[header]; };
-        const sampleNumber = this.tryParseNumber(getVal('SampleNumber'));
-        normalized.SampleNumber = Number.isFinite(sampleNumber) ? (sampleNumber as number) : undefined;
+        const sampleNumber = getVal('SampleNumber');
+        normalized.SampleNumber = sampleNumber ? String(sampleNumber).trim() : "";
+        if (!normalized.SampleNumber) errors.push('SampleNumber is required');
         const exposureGroup = this.normalizeString(getVal('ExposureGroup'));
         if (!exposureGroup) errors.push('ExposureGroup is required');
         normalized.ExposureGroup = exposureGroup;
