@@ -86,6 +86,7 @@ export const deleteOrganization = onCall(async (request) => {
     await deleteCollectionDeep(`organizations/${orgId}/exposureGroups`);
     await deleteCollectionDeep(`organizations/${orgId}/agents`);
     await deleteCollectionDeep(`organizations/${orgId}/importJobs`);
+    await deleteCollectionDeep(`organizations/${orgId}/auditLogs`);
 
     // Delete organization document last
     if (writer) writer.delete(orgRef); else await orgRef.delete();
