@@ -20,7 +20,7 @@ import { BehaviorSubject, firstValueFrom } from 'rxjs';
 import { AgentsDialogComponent } from './agents-dialog/agents-dialog.component';
 import { AgentService } from '../../services/agent/agent.service';
 import { ColumnMappingDialogComponent } from './column-mapping-dialog/column-mapping-dialog.component';
-import { UploadService, SheetOptionInfo } from './upload.service';
+import { UploadService, SheetOptionInfo, UploadError, ProcessResult } from './upload.service';
 import { DataService } from './data.service';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatProgressBarModule } from '@angular/material/progress-bar';
@@ -126,12 +126,22 @@ export class DataComponent {
     this.isParsing.set(true);
     this.parsePercent.set(0);
     this.parseLabel.set('Reading file…');
-    const result = await this.upload.processFile(file, (p, label) => {
-      this.parsePercent.set(p);
-      if (label) this.parseLabel.set(label);
-    }).finally(() => {
+    let result: ProcessResult | null = null;
+    try {
+      result = await this.upload.processFile(file, (p, label) => {
+        this.parsePercent.set(p);
+        if (label) this.parseLabel.set(label);
+      });
+    } catch (error) {
+      this.handleUploadError(error);
+      return;
+    } finally {
       this.isParsing.set(false);
-    });
+      if (event?.target) {
+        event.target.value = '';
+      }
+    }
+    if (!result) return;
     this.lastWorkbook = result.workbook;
     this.lastSheetOptions = result.sheetOptions;
     this.lastRequired = result.required;
@@ -172,6 +182,16 @@ export class DataComponent {
       this.lastFinalMapping = finalMapping;
       this.calculateExceedanceFraction();
     });
+  }
+  private handleUploadError(error: unknown) {
+    let message = 'Unable to read the selected file. Please make sure it is not open elsewhere and try again.';
+    if (error instanceof UploadError) {
+      message = error.message || message;
+    } else if (error instanceof Error && error.message) {
+      message = error.message;
+    }
+    console.error('Excel import failed', error);
+    this.snackBar.open(message, 'Dismiss', { duration: 8000, verticalPosition: 'top' });
   }
   openMappingDialog() {
     if (!this.lastWorkbook || !this.lastSheetOptions.length) return;

@@ -1,3 +1,21 @@
+<div class="ez-table-toolbar">
+    <button mat-icon-button
+            type="button"
+            aria-label="Table actions"
+            matTooltip="Table actions"
+            [matMenuTriggerFor]="ezTableMenu">
+        <mat-icon>more_vert</mat-icon>
+    </button>
+</div>
+<mat-menu #ezTableMenu="matMenu">
+    <button mat-menu-item
+            type="button"
+            (click)="exportVisibleRows()">
+        <mat-icon>download</mat-icon>
+        <span>Export visible rows</span>
+    </button>
+</mat-menu>
+
 <!-- If items or exposure group data provided, show expandable rows mode -->
 @if (items().length > 0 || data().length > 0) {
 <div class="ez-table-viewport"

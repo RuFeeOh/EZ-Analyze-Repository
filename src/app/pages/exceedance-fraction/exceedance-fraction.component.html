@@ -226,7 +226,8 @@
                [filterText]="filter()"
                filterKey="ExposureGroup"
                defaultSortActive="ExposureGroup"
-               defaultSortDirection="asc">
+               defaultSortDirection="asc"
+               [exportFormatters]="efExportFormatters">
           <ng-template #headerCell
                        let-id="id">
                <ng-container [ngSwitch]="id">

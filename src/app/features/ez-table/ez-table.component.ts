@@ -9,8 +9,17 @@ import { ExposureGroupTableItem } from '../../models/exposure-group-table-item.m
 import { MatIconModule } from '@angular/material/icon';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { MatButtonModule } from '@angular/material/button';
+import { MatMenuModule } from '@angular/material/menu';
 import { EzColumn } from '../../models/ez-column.model';
 import { LiveAnnouncer } from '@angular/cdk/a11y';
+
+export type EzTableExportFormatter = (context: {
+  value: any;
+  row: any;
+  column: string | EzColumn;
+  columnId: string;
+  section: 'summary' | 'detail';
+}) => string | number | null | undefined;
 
 @Component({
   selector: 'ez-table',
@@ -22,6 +31,7 @@ import { LiveAnnouncer } from '@angular/cdk/a11y';
     MatIconModule,
     MatTooltipModule,
     MatButtonModule,
+    MatMenuModule,
   ],
   templateUrl: './ez-table.component.html',
   styleUrl: './ez-table.component.scss'
@@ -49,6 +59,8 @@ export class EzTableComponent implements AfterViewInit {
   // Paginator config
   readonly pageSize = input<number>(1000);
   readonly pageSizeOptions = input<number[]>([5, 10, 25, 50, 1000]);
+  // Optional export-specific formatting overrides (per column id)
+  readonly exportFormatters = input<Record<string, EzTableExportFormatter> | null>(null);
 
   // Deprecated/back-compat inputs (will be removed when callers migrate)
   readonly displayedColumns = input<(string | EzColumn)[]>(['SampleDate', 'ExposureGroup', 'TWA', 'Notes', 'SampleNumber']);
@@ -95,6 +107,7 @@ export class EzTableComponent implements AfterViewInit {
   // Persistent data sources to keep MatSort bindings stable
   private groupDataSource = new MatTableDataSource<any>([]);
   private flatDataSource = new MatTableDataSource<ExposureGroupTableItem>([]);
+  private percentFormatter = new Intl.NumberFormat(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
   // Resolve string IDs for columns to satisfy MatTable APIs
   columnIds = computed(() => (this.displayedColumns() ?? []).map(c => typeof c === 'string' ? c : c.Name));
   summaryColumnIds = computed(() => (this.summaryColumns()?.length ? this.summaryColumns() : this.defaultSummaryColumns()).map(c => typeof c === 'string' ? c : c.Name));
@@ -285,6 +298,71 @@ export class EzTableComponent implements AfterViewInit {
   // Row predicate to render expanded detail rows only for expanded items
   protected rowIsExpanded = (_index: number, row: any) => this.expandedKey === this.groupKey(row);
 
+  public exportVisibleRows() {
+    const columns = this.getActiveColumns();
+    const rows = this.getVisibleRows();
+    if (!columns.length || !rows.length) {
+      console.warn('EZ Table export skipped: no visible data.');
+      return;
+    }
+    const csv = this.buildCsv(columns, rows);
+    this.triggerCsvDownload(csv);
+  }
+
+  private triggerCsvDownload(csv: string) {
+    if (!csv) return;
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    const timestamp = new Date().toISOString().split('T')[0];
+    link.href = url;
+    link.setAttribute('download', `ez-table-export-${timestamp}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }
+
+  private buildCsv(columns: (string | EzColumn)[], rows: any[]): string {
+    const header = columns.map(col => this.escapeCsv(this.columnHeader(col))).join(',');
+    const body = rows.map(row => columns.map(col => this.escapeCsv(this.valueForExport(row, col, 'summary'))).join(','));
+    return [header, ...body].join('\n');
+  }
+
+  private escapeCsv(value: any): string {
+    const raw = value == null ? '' : String(value);
+    const needsQuotes = /[",\n]/.test(raw);
+    const escaped = raw.replace(/"/g, '""');
+    return needsQuotes ? `"${escaped}"` : escaped;
+  }
+
+  private getActiveColumns(): (string | EzColumn)[] {
+    if (this.isGroupModeActive()) {
+      const cols = this.summaryColumns();
+      if (cols?.length) return cols;
+      return this.defaultSummaryColumns();
+    }
+    return this.displayedColumns() ?? [];
+  }
+
+  private getVisibleRows(): any[] {
+    const dataSource = this.isGroupModeActive() ? this.groupTableSource() : this.dataTableSource();
+    if (!dataSource) return [];
+    const filtered = dataSource.filteredData?.slice() ?? dataSource.data?.slice() ?? [];
+    const sorted = dataSource.sort ? dataSource.sortData(filtered, dataSource.sort) : filtered;
+    const paginator = dataSource.paginator;
+    if (paginator) {
+      const start = paginator.pageIndex * paginator.pageSize;
+      const end = start + paginator.pageSize;
+      return sorted.slice(start, end);
+    }
+    return sorted;
+  }
+
+  private isGroupModeActive(): boolean {
+    return (this.items()?.length ?? 0) > 0 || (this.data()?.length ?? 0) > 0;
+  }
+
   // Template helpers
   protected columnId(col: string | EzColumn): string {
     return typeof col === 'string' ? col : col.Name;
@@ -308,6 +386,50 @@ export class EzTableComponent implements AfterViewInit {
 
   protected isTrend(col: string | EzColumn): boolean {
     return typeof col !== 'string' && (col?.Format === 'trend');
+  }
+
+  private valueForExport(item: any, col: string | EzColumn, section: 'summary' | 'detail'): any {
+    const key = this.columnId(col);
+    const baseValue = this.valueFor(item, col, section);
+    const formatterMap = this.exportFormatters();
+    const formatter = formatterMap?.[key];
+    if (typeof formatter === 'function') {
+      try {
+        const formatted = formatter({ value: baseValue, row: item, column: col, columnId: key, section });
+        if (formatted !== undefined && formatted !== null) {
+          return formatted;
+        }
+      } catch (err) {
+        console.warn('EZ Table export formatter failed for column', key, err);
+      }
+    }
+    if (this.shouldFormatAsPercent(col)) {
+      return this.formatPercent(baseValue);
+    }
+    return baseValue ?? '';
+  }
+
+  private shouldFormatAsPercent(col: string | EzColumn): boolean {
+    return typeof col !== 'string' && (col?.Format === 'percent' || col?.Format === 'percent-badge');
+  }
+
+  private formatPercent(raw: any): string {
+    if (raw === undefined || raw === null || raw === '') return '';
+    if (typeof raw === 'string') {
+      const trimmed = raw.trim();
+      if (!trimmed) return '';
+      if (trimmed.endsWith('%')) return trimmed;
+      const parsed = Number(trimmed);
+      if (!isNaN(parsed)) {
+        return this.percentFormatter.format(parsed > 1 ? parsed : parsed * 100) + '%';
+      }
+      return trimmed;
+    }
+    if (typeof raw === 'number' && isFinite(raw)) {
+      const percentValue = raw > 1 ? raw : raw * 100;
+      return this.percentFormatter.format(percentValue) + '%';
+    }
+    return '';
   }
 
   // Resolve values for summary/detail cells

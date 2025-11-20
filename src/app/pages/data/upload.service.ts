@@ -22,6 +22,13 @@ export interface ProcessResult {
     allRequiredMapped: boolean;
 }
 
+export class UploadError extends Error {
+    constructor(public code: 'file-access' | 'parse' | 'unknown', message: string, public original?: any) {
+        super(message);
+        this.name = 'UploadError';
+    }
+}
+
 @Injectable({
     providedIn: 'root'
 })
@@ -59,10 +66,29 @@ export class UploadService {
             'Almost there…',
             'Ready to parse…'
         ]);
-        const data = await this.readFileWithProgress(file, (p) => {
-            // Map raw reader percent (0..95) into section 0 (0..32) as target
-            prog.setSectionTargetFraction(Math.min(0.95, Math.max(0, (p || 0) / 100)));
-        });
+        const readerProgress = (p: number | null, label?: string) => {
+            if (p === null) {
+                if (label) prog.bumpLabel(label);
+                return;
+            }
+            const normalized = Math.min(0.95, Math.max(0, (p || 0) / 100));
+            prog.setSectionTargetFraction(normalized, label);
+        };
+
+        let data: ArrayBuffer;
+        try {
+            data = await this.readFileWithProgress(file, readerProgress);
+        } catch (err) {
+            if (!this.isFileAccessIssue(err)) {
+                throw err;
+            }
+            try {
+                prog.bumpLabel('Requesting file permission…');
+                data = await this.readFileViaStream(file, readerProgress);
+            } catch (fallbackErr) {
+                throw new UploadError('file-access', this.buildFileAccessHelp(file), fallbackErr);
+            }
+        }
         // Gate to 33% at reader completion
         prog.completeSection('Querying workbook…');
         this.workbookBuffer = data;
@@ -326,6 +352,64 @@ export class UploadService {
             };
             reader.readAsArrayBuffer(file);
         });
+    }
+
+    private async readFileViaStream(file: File, onProgress?: (percent: number | null, label?: string) => void): Promise<ArrayBuffer> {
+        const total = file.size || 0;
+        const streamFactory = (file as any).stream;
+        if (typeof streamFactory === 'function') {
+            const reader: ReadableStreamDefaultReader<Uint8Array> = streamFactory.call(file).getReader();
+            const chunks: Uint8Array[] = [];
+            let loaded = 0;
+            try {
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    if (value) {
+                        chunks.push(value);
+                        loaded += value.length;
+                        if (total > 0) {
+                            const percent = Math.min(95, Math.floor((loaded / total) * 95));
+                            onProgress?.(percent, 'Reading file…');
+                        } else {
+                            onProgress?.(null, 'Reading file…');
+                        }
+                    }
+                }
+            } finally {
+                reader.releaseLock();
+            }
+            const result = new Uint8Array(loaded);
+            let offset = 0;
+            for (const chunk of chunks) {
+                result.set(chunk, offset);
+                offset += chunk.length;
+            }
+            onProgress?.(95, 'Finalizing read…');
+            return result.buffer;
+        }
+        if (typeof file.arrayBuffer === 'function') {
+            onProgress?.(null, 'Reading file…');
+            return await file.arrayBuffer();
+        }
+        throw new Error('Streaming APIs are not available in this browser.');
+    }
+
+    private isFileAccessIssue(error: any): boolean {
+        if (!error) return false;
+        const name = (error?.name || '').toString();
+        if (name === 'NotReadableError' || name === 'SecurityError') return true;
+        const code = (error?.code ?? '').toString();
+        if (code === '24' || code === 'NotReadableError') return true;
+        if (typeof DOMException !== 'undefined' && error instanceof DOMException) {
+            return error.name === 'NotReadableError';
+        }
+        const message = (error?.message || '').toString().toLowerCase();
+        return message.includes('could not be read') || message.includes('permission');
+    }
+
+    private buildFileAccessHelp(file: File): string {
+        return `Your browser couldn't read "${file?.name || 'the selected file'}". macOS can block access when a file lives on a different drive or a protected folder. Move the Excel file to a folder your browser can access (Downloads/Desktop) or grant the browser Full Disk Access in System Settings → Privacy & Security → Files and Folders, then try again.`;
     }
 
     // Progress Orchestrator: ensures

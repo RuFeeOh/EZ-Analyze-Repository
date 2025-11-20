@@ -21,7 +21,7 @@ import { MatMenuModule } from '@angular/material/menu';
 import { MatButtonToggleModule } from '@angular/material/button-toggle';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
-import { EzTableComponent } from '../../features/ez-table/ez-table.component';
+import { EzTableComponent, EzTableExportFormatter } from '../../features/ez-table/ez-table.component';
 import { SampleInfo } from '../../models/sample-info.model';
 import { Observable, combineLatest, of, firstValueFrom } from 'rxjs';
 import { map, switchMap } from 'rxjs/operators';
@@ -82,6 +82,14 @@ export class ExceedanceFractionComponent {
     if (v < 0.20) return 'warn';
     return 'bad';
   }
+
+  private formatEfPercentForExport(raw: any): string {
+    if (raw === undefined || raw === null || raw === '') return '';
+    const numeric = typeof raw === 'number' ? raw : Number(raw);
+    if (isNaN(numeric)) return '';
+    const percent = numeric <= 1 ? numeric * 100 : numeric;
+    return `${percent.toFixed(1)}%`;
+  }
   // Table configuration for ez-table (generic)
   readonly efSummaryColumns = [
     new EzColumn({ Name: 'ExposureGroup', DisplayName: 'Exposure Group' }),
@@ -99,6 +107,9 @@ export class ExceedanceFractionComponent {
     new EzColumn({ Name: 'Select', DisplayName: '', Sortable: false }),
     ...this.efSummaryColumns
   ];
+  readonly efExportFormatters: Record<string, EzTableExportFormatter> = {
+    ExceedanceFraction: ({ value }) => this.formatEfPercentForExport(value)
+  };
 
   constructor() {
     const orgId = this.orgService.orgStore.currentOrg()?.Uid;
