@@ -5,7 +5,8 @@ import { CommonModule } from '@angular/common';
 import { Firestore } from '@angular/fire/firestore';
 import { collection, query, orderBy, doc, getDoc } from 'firebase/firestore';
 import { collectionData } from '@angular/fire/firestore';
-import { Functions, httpsCallable } from '@angular/fire/functions';
+import { Functions } from '@angular/fire/functions';
+import { httpsCallable as httpsCallableFn } from 'firebase/functions';
 import { OrganizationService } from '../../services/organization/organization.service';
 import { MatTableModule } from '@angular/material/table';
 import { MatIconModule } from '@angular/material/icon';
@@ -238,7 +239,7 @@ export class ExceedanceFractionComponent {
         }
       }, () => { /* ignore */ });
 
-      const callable = httpsCallable<{ orgId: string; jobId: string }, any>(this.fns, 'undoImport');
+      const callable = httpsCallableFn<{ orgId: string; jobId: string }, any>(this.fns, 'undoImport');
       // Fire-and-follow: kick off the undo and follow progress from the job doc.
       // The callable may time out on the client before the work finishes; that's okay.
       callable({ orgId, jobId }).then(() => {
@@ -506,7 +507,7 @@ export class ExceedanceFractionComponent {
           removals.push({ groupId, agentKey, agentName });
         }
       }
-      const callable = httpsCallable<{ orgId: string; removals: { groupId: string; agentKey: string; agentName?: string }[]; trackJob?: boolean; jobId?: string; totalAgents?: number; totalGroups?: number }, any>(this.fns, 'removeAgentsFromExposureGroups');
+      const callable = httpsCallableFn<{ orgId: string; removals: { groupId: string; agentKey: string; agentName?: string }[]; trackJob?: boolean; jobId?: string; totalAgents?: number; totalGroups?: number }, any>(this.fns, 'removeAgentsFromExposureGroups');
       await callable({ orgId, removals, trackJob: true, jobId, totalAgents, totalGroups });
       this.selection.clear();
       if (taskId && !completedViaSnapshot) {
@@ -586,7 +587,7 @@ export class ExceedanceFractionComponent {
       TWA: twa,
       Notes: sample?.Notes ?? null,
     };
-    const callable = httpsCallable<{ orgId: string; groupId: string; samples: any[] }, any>(this.fns, 'deleteSamplesFromExposureGroup');
+    const callable = httpsCallableFn<{ orgId: string; groupId: string; samples: any[] }, any>(this.fns, 'deleteSamplesFromExposureGroup');
     let taskId: string | null = null;
     try {
       this.sampleDeletingKey.set(key);

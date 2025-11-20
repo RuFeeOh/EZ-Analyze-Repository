@@ -887,7 +887,7 @@ function undoImportsAndRespectExisting(
     const keep: any[] = [];
     const seenKeys = new Set<string>();
     let removedCount = 0;
-    const normalize = (r: any): SampleInfo => (new SampleInfo({
+    const normalize = (r: any): SampleInfo => ({
         Location: r?.Location ?? "",
         SampleNumber: (r?.SampleNumber === undefined || r?.SampleNumber === '') ? null : r?.SampleNumber,
         SampleDate: r?.SampleDate ?? "",
@@ -898,7 +898,7 @@ function undoImportsAndRespectExisting(
         Notes: r?.Notes ?? "",
         ImportJobId: r?.ImportJobId ?? null,
         Group: "",
-    } as SampleInfo));
+    } as SampleInfo);
     const normalizedBefore = eGResults.map(normalize);
     findExistingResults(eGResults, (result: any) => getRowKeyVariants(result), jobId, replacedMap, keep, seenKeys, (dropped: boolean) => { if (dropped) removedCount += 1; });
     // Restore replaced rows
@@ -1489,7 +1489,7 @@ export const deleteSamplesFromExposureGroup = onCall(async (request) => {
             tx.delete(parentRef);
             return { status: 'deleted', removedCount: removed.length, summary: null };
         }
-        const normalize = (r: any): SampleInfo => new SampleInfo({
+        const normalize = (r: any): SampleInfo => ({
             Location: r?.Location ?? "",
             SampleNumber: (r?.SampleNumber === undefined || r?.SampleNumber === '') ? null : r?.SampleNumber,
             SampleDate: r?.SampleDate ?? "",
